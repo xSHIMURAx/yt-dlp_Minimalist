@@ -1606,8 +1606,46 @@ menuAbout.addEventListener('click', () => {
 const aboutOverlay = document.getElementById('about-overlay');
 const aboutCloseBtn = document.getElementById('about-close-btn');
 const aboutVersionEl = document.getElementById('about-version');
+const aboutFfmpegVersionEl = document.getElementById('about-ffmpeg-version');
+const aboutDenoVersionEl = document.getElementById('about-deno-version');
 
 let aboutVersionLoaded = false;
+
+// Extrae solo el número de versión (ej. "6.0" o "1.42.0") de la primera
+// línea que devuelve el binario (ej. "ffmpeg version 6.0-full_build..." o
+// "deno 1.42.0 (release, ...)"). Si no encuentra un patrón de versión,
+// devuelve null y el llamador usa el texto crudo o un mensaje por defecto.
+function extractShortVersion(raw) {
+  if (!raw) return null;
+  const match = raw.match(/(\d+(?:\.\d+){1,3})/);
+  return match ? match[1] : null;
+}
+
+// Consulta la versión real de ffmpeg y Deno actualmente instalados
+// (misma fuente que el panel de Actualizaciones) y actualiza las filas
+// correspondientes en "Librerías usadas". Se llama cada vez que se abre
+// el panel, así que si el usuario actualizó ffmpeg o Deno, la próxima vez
+// que abra "Acerca de" verá el número de versión nuevo automáticamente.
+async function loadAboutLibraryVersions() {
+  aboutFfmpegVersionEl.textContent = 'Consultando versión…';
+  aboutDenoVersionEl.textContent = 'Consultando versión…';
+  try {
+    const info = await window.yoinksAPI.getUpdateVersions();
+
+    const ffmpegShort = extractShortVersion(info.ffmpegVersion);
+    aboutFfmpegVersionEl.textContent = ffmpegShort
+      ? `v${ffmpegShort}`
+      : info.ffmpegVersion || 'descargado automáticamente';
+
+    const denoShort = extractShortVersion(info.denoVersion);
+    aboutDenoVersionEl.textContent = denoShort
+      ? `v${denoShort}`
+      : info.denoVersion || 'descargado automáticamente';
+  } catch {
+    aboutFfmpegVersionEl.textContent = 'descargado automáticamente';
+    aboutDenoVersionEl.textContent = 'descargado automáticamente';
+  }
+}
 
 async function openAboutPanel() {
   closeAllOverlayPanels();
@@ -1621,6 +1659,7 @@ async function openAboutPanel() {
       // deja el texto por defecto si falla
     }
   }
+  loadAboutLibraryVersions();
 }
 
 function closeAboutPanel() {
