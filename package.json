@@ -1,0 +1,40 @@
+{
+  "name": "yt-dlp-interface",
+  "version": "1.0.0",
+  "description": "YT-DLP Interface — versión de escritorio",
+  "main": "src/main.js",
+  "author": "✿ S H I M U R A ✿",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "dependencies": {
+    "yt-dlp-wrap": "^2.3.12"
+  },
+  "build": {
+    "appId": "com.tuusuario.ytdlpinterface",
+    "productName": "YT-DLP Interface",
+    "copyright": "✿ S H I M U R A ✿",
+    "win": {
+      "target": [
+        { "target": "nsis", "arch": ["x64"] },
+        { "target": "portable", "arch": ["x64"] }
+      ],
+      "icon": "assets/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": true,
+      "allowToChangeInstallationDirectory": true
+    },
+    "files": [
+      "src/**/*",
+      "package.json"
+    ]
+  }
+}
