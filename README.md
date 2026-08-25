@@ -2,16 +2,18 @@
 
 ![Vista principal](screenshots/Principal.gif)
 
-Interfaz de escritorio minimalista para yt-dlp, hecha con Electron — descarga video y audio, con ffmpeg y Deno gestionados automáticamente y actualizaciones desde la propia app.
+## Interfaz de escritorio minimalista para yt-dlp, hecha con Electron, descarga video, audio y Playlist completas de Youtube, ademas de soporte de diferentes plataformas.
 
-Descargas
+## Descargas
 
 YT-DLP Minimalist Setup 1.0.0.exe — instalador (recomendado para la mayoría).
 
 YT-DLP Minimalist 1.0.0 Portable.exe — versión portable, no requiere instalación.
 
+## Requisitos
+Windows 10/11 (64 bits)
 
-Seguridad
+## Seguridad
 
 Ambos archivos fueron analizados en VirusTotal y salieron limpios:
 
