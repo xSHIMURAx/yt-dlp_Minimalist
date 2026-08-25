@@ -2,9 +2,24 @@
 
 ![Vista principal](screenshots/Principal.gif)
 
-Versión de escritorio (Electron) inspirada en el diseño del [yoinks](https://github.com/pablostanley/yoinks)
-original de terminal — mismo look (fondo negro, logo en bloques, caja de
-"Paste a link" con borde punteado), rebautizada como "YT-DLP Minimalist".
+Interfaz de escritorio minimalista para yt-dlp, hecha con Electron — descarga video y audio, con ffmpeg y Deno gestionados automáticamente y actualizaciones desde la propia app.
+
+Descargas
+YT-DLP Minimalist Setup 1.0.0.exe — instalador (recomendado para la mayoría).
+
+YT-DLP Minimalist 1.0.0 Portable.exe — versión portable, no requiere instalación.
+Seguridad
+
+Ambos archivos fueron analizados en VirusTotal y salieron limpios:
+
+Instalador: 0/66 detecciones — ver reporte
+
+Portable: 0/68 detecciones — ver reporte
+
+Nota: el .exe no tiene firma digital de código (certificado de pago), así que Windows SmartScreen puede mostrar una advertencia la primera vez que lo ejecutes ("Windows protegió tu PC"). Es normal en apps sin firmar y no significa que el archivo esté infectado — puedes verificarlo tú mismo en los links de VirusTotal de arriba. Para continuar, haz clic en "Más información" → "Ejecutar de todas formas".
+
+Requisitos
+Windows 10/11 (64 bits)
 
 ## Capturas del programa
 
