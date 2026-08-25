@@ -1,8 +1,8 @@
-# YT-DLP Interface
+# YT-DLP Minimalist
 
 Versión de escritorio (Electron) inspirada en el diseño del [yoinks](https://github.com/pablostanley/yoinks)
 original de terminal — mismo look (fondo negro, logo en bloques, caja de
-"Paste a link" con borde punteado), rebautizada como "YT-DLP Interface".
+"Paste a link" con borde punteado), rebautizada como "YT-DLP Minimalist".
 
 ## Requisitos
 
@@ -24,11 +24,20 @@ npm run dist
 Esto usa `electron-builder` y genera un instalador `.exe` (NSIS) y una
 versión portable en `dist/`.
 
-### Incluir yt-dlp dentro del .exe (recomendado)
+### Incluir yt-dlp, ffmpeg y Deno dentro del .exe (recomendado)
+
+Los tres binarios se empaquetan igual, desde la misma carpeta:
 
 1. Descarga `yt-dlp.exe` desde https://github.com/yt-dlp/yt-dlp/releases
-2. Colócalo en `assets/bin/yt-dlp.exe`
-3. Agrega esto a `extraResources` en el `build` de `package.json`:
+2. Descarga `ffmpeg.exe` desde https://www.gyan.dev/ffmpeg/builds/ (build
+   "release essentials"; el `.zip` trae varios `.exe` en `bin/`, solo
+   necesitás `ffmpeg.exe`)
+3. Descarga `deno.exe` desde https://github.com/denoland/deno/releases
+   (`deno-x86_64-pc-windows-msvc.zip`)
+4. Colocá los tres en `assets/bin/` (`yt-dlp.exe`, `ffmpeg.exe`, `deno.exe`)
+
+El `build` de `package.json` ya tiene `extraResources` apuntando a esa
+carpeta:
 
 ```json
 "extraResources": [
@@ -36,10 +45,12 @@ versión portable en `dist/`.
 ]
 ```
 
-ffmpeg no viene empaquetado dentro del `.exe`: la app lo descarga sola a su
-carpeta de configuración (junto a yt-dlp y, si lo instalas, Deno) la primera
-vez que se abre, así que no necesitas instalarlo aparte. También puedes
-forzar una redescarga/actualización desde Configuración → Actualizaciones.
+Si un binario no está en `assets/bin`, la app no rompe: sigue descargándolo
+sola a su carpeta de configuración (`userData/bin`) la primera vez que hace
+falta, igual que antes. Empaquetarlos solo evita esa descarga inicial y hace
+que la app funcione sin conexión desde el primer arranque — a cambio, el
+instalador pesa bastante más. También podés forzar una redescarga/
+actualización de cualquiera de los tres desde Configuración → Actualizaciones.
 
 ## Estructura
 

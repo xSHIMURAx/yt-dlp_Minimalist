@@ -2858,10 +2858,12 @@ async function autoInstallMissingBinaries() {
   if (info.ffmpegVersion === 'No instalado') missing.push('ffmpeg');
   // Deno: se descarga la copia propia de la app aunque el sistema ya tenga
   // Deno instalado por fuera (ej. para desarrollo), porque yt-dlp acá solo
-  // usa la copia administrada por la app (ver getDenoPath() en main.js) —
-  // basarse en "denoVersion" haría creer que ya está listo cuando en
-  // realidad esa versión detectada no es la que yt-dlp terminaría usando.
-  if (!info.denoManaged) missing.push('deno');
+  // usa la copia administrada o la empaquetada dentro del .exe (ver
+  // getDenoPath() en main.js) — basarse en "denoVersion" haría creer que ya
+  // está listo cuando en realidad esa versión detectada no es la que yt-dlp
+  // terminaría usando. denoAvailable sí contempla ambos casos (administrado
+  // o empaquetado), a diferencia de denoManaged que solo mira lo administrado.
+  if (!info.denoAvailable) missing.push('deno');
 
   if (missing.length === 0) return;
 

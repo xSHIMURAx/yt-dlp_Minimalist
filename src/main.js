@@ -498,7 +498,7 @@ function saveLoginStatus(status) {
 // Convierte las cookies de una sesión de Electron al formato Netscape (cookies.txt)
 // que yt-dlp espera con --cookies.
 function cookiesToNetscapeFile(cookies) {
-  const lines = ['# Netscape HTTP Cookie File', '# Generado por YT-DLP Interface (inicio de sesión en la app)', ''];
+  const lines = ['# Netscape HTTP Cookie File', '# Generado por YT-DLP Minimalist (inicio de sesión en la app)', ''];
   const farFuture = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 365 * 2; // 2 años, para cookies "de sesión"
   for (const c of cookies) {
     if (!c.domain || !c.name) continue;
@@ -861,6 +861,15 @@ ipcMain.handle('update:get-versions', async () => {
     ffmpegManaged: fs.existsSync(getManagedFfmpegPath()),
     denoVersion: (await getBinaryVersion(getDenoPath() || 'deno', ['--version'])) || 'No instalado',
     denoManaged: fs.existsSync(getManagedDenoPath()),
+    // denoAvailable: true si yt-dlp va a poder usar un Deno real al llamarlo
+    // (administrado O empaquetado dentro del .exe). Distinto de denoManaged
+    // (que solo mira la carpeta administrada): sirve para que el auto-install
+    // del primer arranque no vuelva a descargar Deno cuando ya viene
+    // empaquetado. No se puede usar denoVersion para esto porque, si no hay
+    // ni administrado ni empaquetado, esa versión cae al "deno" del PATH del
+    // sistema (solo para mostrarlo en pantalla) y ese Deno no es el que
+    // getDenoPath()/yt-dlp terminan usando.
+    denoAvailable: !!getDenoPath(),
   };
 });
 
@@ -1531,14 +1540,19 @@ function extractErrorMessage(stderrText, cookieContext) {
   return message || 'yt-dlp falló';
 }
 
-// FFmpeg ya no se incluye empaquetado con la app (se quitó la dependencia
-// ffmpeg-static): la app depende exclusivamente del ffmpeg que vive en la
-// carpeta administrada (userData/bin), la misma donde están yt-dlp y deno.
-// Si no está ahí, se descarga automáticamente (ver ensureManagedFfmpeg más
-// abajo) la primera vez que se necesita.
+// FFmpeg se busca primero en la carpeta administrada (userData/bin, la que
+// gestiona el panel de Actualizaciones) y, si no está ahí, en el ffmpeg.exe
+// empaquetado dentro del .exe (assets/bin -> resourcesPath/bin, ver
+// package.json "extraResources"). Si tampoco está empaquetado, se descarga
+// automáticamente a la carpeta administrada la primera vez que se necesita
+// (ver ensureManagedFfmpeg más abajo).
 function getFfmpegPath() {
   const managed = getManagedFfmpegPath();
   if (fs.existsSync(managed)) return managed;
+
+  const bundled = path.join(process.resourcesPath || __dirname, 'bin', 'ffmpeg.exe');
+  if (fs.existsSync(bundled)) return bundled;
+
   return null;
 }
 
@@ -1587,13 +1601,16 @@ function downloadManagedFfmpeg(onProgress) {
   return ffmpegDownloadPromise;
 }
 
-// Se llama antes de cualquier descarga de video/audio: si ya hay un ffmpeg
-// en la carpeta administrada lo usa tal cual; si no, lo descarga ahí mismo
-// (mostrando progreso en el panel de Actualizaciones si está abierto) antes
-// de continuar.
+// Se llama antes de cualquier descarga de video/audio (y también al abrir la
+// app): si ya hay un ffmpeg disponible -en la carpeta administrada o
+// empaquetado dentro del .exe- lo usa tal cual; si no hay ninguno, lo
+// descarga a la carpeta administrada (mostrando progreso en el panel de
+// Actualizaciones si está abierto) antes de continuar. Usar getFfmpegPath()
+// acá (en vez de mirar solo la carpeta administrada) evita que la app
+// re-descargue ffmpeg en cada primer arranque cuando ya viene empaquetado.
 function ensureManagedFfmpeg(onProgress) {
-  const managed = getManagedFfmpegPath();
-  if (fs.existsSync(managed)) return Promise.resolve(managed);
+  const existing = getFfmpegPath();
+  if (existing) return Promise.resolve(existing);
   return downloadManagedFfmpeg(onProgress);
 }
 
@@ -1647,13 +1664,19 @@ function getManagedDenoPath() {
   return path.join(getManagedBinDir(), filename);
 }
 
-// Deno solo se usa si el usuario lo instaló desde el panel de Actualizaciones
-// (no viene incluido con la app). Si no está, yt-dlp simplemente sigue
+// Deno se busca primero en la carpeta administrada (userData/bin) y luego en
+// el deno.exe empaquetado dentro del .exe (assets/bin, igual que ffmpeg y
+// yt-dlp). Si no está en ninguno de los dos lugares, yt-dlp simplemente sigue
 // funcionando como hasta ahora (algunos formatos/videos con restricciones
-// pueden fallar en su extracción sin él).
+// pueden fallar en su extracción sin él); el usuario puede instalarlo desde
+// el panel de Actualizaciones.
 function getDenoPath() {
   const managed = getManagedDenoPath();
   if (fs.existsSync(managed)) return managed;
+
+  const bundled = path.join(process.resourcesPath || __dirname, 'bin', 'deno.exe');
+  if (fs.existsSync(bundled)) return bundled;
+
   return null;
 }
 
