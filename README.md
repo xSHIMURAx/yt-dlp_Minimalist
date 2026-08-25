@@ -6,7 +6,37 @@ Versión de escritorio (Electron) inspirada en el diseño del [yoinks](https://g
 original de terminal — mismo look (fondo negro, logo en bloques, caja de
 "Paste a link" con borde punteado), rebautizada como "YT-DLP Minimalist".
 
-## Requisitos
+## Capturas del programa
+
+**Información del video y selección de calidad**
+
+![Información del video](screenshots/01.png)
+
+**Descarga de playlists completas**
+
+![Descarga de playlist](screenshots/02.png)
+
+**Configuración de descarga**
+
+![Configuración de descarga](screenshots/03.png)
+
+**Descargas en curso**
+
+![Descargas en curso](screenshots/04.png)
+
+**Opciones predeterminadas (presets)**
+
+![Opciones predeterminadas](screenshots/05.png)
+
+**Panel de actualizaciones**
+
+![Actualizaciones](screenshots/06.png)
+
+**Ventana "Acerca de"**
+
+![Acerca de](screenshots/07.png)
+
+## Requisitos para compilarla tu mismo
 
 - [Node.js](https://nodejs.org) 18 o superior
 
@@ -67,35 +97,6 @@ yt-dlp-interface/
 │   └── renderer.js
 └── assets/
 ```
-## Capturas del programa
-
-**Información del video y selección de calidad**
-
-![Información del video](screenshots/01.png)
-
-**Descarga de playlists completas**
-
-![Descarga de playlist](screenshots/02.png)
-
-**Configuración de descarga**
-
-![Configuración de descarga](screenshots/03.png)
-
-**Descargas en curso**
-
-![Descargas en curso](screenshots/04.png)
-
-**Opciones predeterminadas (presets)**
-
-![Opciones predeterminadas](screenshots/05.png)
-
-**Panel de actualizaciones**
-
-![Actualizaciones](screenshots/06.png)
-
-**Ventana "Acerca de"**
-
-![Acerca de](screenshots/07.png)
 
 ## Licencia y créditos
 
