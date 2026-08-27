@@ -54,7 +54,7 @@ Nota: el .exe no tiene firma digital de código (certificado de pago), así que 
 
 ![Acerca de](screenshots/07.png)
 
-## Requisitos para compilarla tu mismo
+## Requisitos para compilarlo tu mismo
 
 - [Node.js](https://nodejs.org) 18 o superior
 
