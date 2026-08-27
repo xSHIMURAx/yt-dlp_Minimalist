@@ -2,100 +2,98 @@
 
 ![Vista principal](screenshots/Principal.gif)
 
-## Interfaz de escritorio minimalista para yt-dlp, hecha con Electron, descarga video, audio y Playlist completas de Youtube, ademas de soporte de diferentes plataformas.
+## A minimalist desktop interface for yt-dlp, built with Electron, that downloads videos, audio, and entire playlists from YouTube, and supports multiple platforms.
 
-## Descargas
+## Downloads
 
-YT-DLP Minimalist Setup 1.0.0.exe — instalador (recomendado para la mayoría).
+YT-DLP Minimalist Setup 1.0.0.exe — installer (recommended for most users)
 
-YT-DLP Minimalist 1.0.0 Portable.exe — versión portable, no requiere instalación.
+YT-DLP Minimalist 1.0.0 Portable.exe — Portable version; no installation required.
 
-## Requisitos
+## Requirements
 Windows 10/11 (64 bits)
 
-## Seguridad
+## Security
 
-Ambos archivos fueron analizados en VirusTotal y salieron limpios:
+Both files were scanned on VirusTotal and came back clean:
 
-- Instalador: 0/66 detecciones — [Ver resultado](https://www.virustotal.com/gui/file/bd799cc2d090b38a955ff0e8a0b269ef951788cd07d150d840e80bc394e6242f)
+- Installer: 0/66 detections — [View results](https://www.virustotal.com/gui/file/bd799cc2d090b38a955ff0e8a0b269ef951788cd07d150d840e80bc394e6242f)
 - 
-- Portable: 0/68 detecciones — [Ver resultado](https://www.virustotal.com/gui/file/4908a6c2db0b621e3ed0d25d6c45b658a551fd70c6a3e0f7f90e57ae0a143ebc)
-
-Nota: el .exe no tiene firma digital de código (certificado de pago), así que Windows SmartScreen puede mostrar una advertencia la primera vez que lo ejecutes ("Windows protegió tu PC"). Es normal en apps sin firmar y no significa que el archivo esté infectado — puedes verificarlo tú mismo en los links de VirusTotal de arriba. Para continuar, haz clic en "Más información" → "Ejecutar de todas formas".
+- Portable: 0/68 detections — [View result](https://www.virustotal.com/gui/file/4908a6c2db0b621e3ed0d25d6c45b658a551fd70c6a3e0f7f90e57ae0a143ebc)
 
 
-## Capturas del programa
+## Screenshots of the program
 
-**Información del video y selección de calidad**
+**Video Information and Quality Selection**
 
-![Información del video](screenshots/01.png)
+![Video Information](screenshots/01.png)
 
-**Descarga de playlists completas**
+**Downloading Complete Playlists**
 
-![Descarga de playlist](screenshots/02.png)
+![Download Playlist](screenshots/02.png)
 
-**Descargas en curso**
+**Downloads in progress**
 
-![Configuración de descarga](screenshots/03.png)
+![Downloads in progress](screenshots/03.png)
 
-**Ajustes Generales**
+**General Settings**
 
-![Descargas en curso](screenshots/04.png)
+![General Settings](screenshots/04.png)
 
-**Configuración de descarga**
+**Download Settings**
 
-![Opciones predeterminadas](screenshots/05.png)
+![Download Settings](screenshots/05.png)
 
 **Cookies**
 
-![Actualizaciones](screenshots/06.png)
+![Cookies](screenshots/06.png)
 
-**Preajustes**
+**Presets**
 
-![Acerca de](screenshots/07.png)
+![Presets](screenshots/07.png)
 
-**Panel de actualizaciones**
+**Updates Panel**
 
-![Acerca de](screenshots/08.png)
+![Updates Panel](screenshots/08.png)
 
-**Ventana "Acerca de"**
+**“About”**
 
-![Acerca de](screenshots/09.png)
+![About](screenshots/09.png)
 
-## Requisitos para compilarlo tu mismo
+## Requirements for compiling it yourself
 
-- [Node.js](https://nodejs.org) 18 o superior
+- [Node.js](https://nodejs.org) 18 or older
 
-## Desarrollo (probar la app sin empaquetar)
+## Development (test the app without packaging it)
 
 ```bash
 npm install
 npm start
 ```
 
-## Generar el .exe
+## Generate the .exe file
 
 ```bash
 npm run dist
 ```
 
-Esto usa `electron-builder` y genera un instalador `.exe` (NSIS) y una
-versión portable en `dist/`.
+This uses `electron-builder` and generates an installer `.exe` (NSIS) and a
+portable version at `dist/`.
 
 ### Incluir yt-dlp, ffmpeg y Deno dentro del .exe (recomendado)
 
-Los tres binarios se empaquetan igual, desde la misma carpeta:
+The three binaries are packaged the same way, from the same folder:
 
-1. Descarga `yt-dlp.exe` desde https://github.com/yt-dlp/yt-dlp/releases
-2. Descarga `ffmpeg.exe` desde https://www.gyan.dev/ffmpeg/builds/ (build
-   "release essentials"; el `.zip` trae varios `.exe` en `bin/`, solo
-   necesitás `ffmpeg.exe`)
-3. Descarga `deno.exe` desde https://github.com/denoland/deno/releases
+1. Download `yt-dlp.exe` from https://github.com/yt-dlp/yt-dlp/releases
+2. Download `ffmpeg.exe` from https://www.gyan.dev/ffmpeg/builds/ (build
+   "release essentials"; el `.zip` includes several `.exe` in `bin/`, just
+   needs `ffmpeg.exe`)
+3. Download `deno.exe` from https://github.com/denoland/deno/releases
    (`deno-x86_64-pc-windows-msvc.zip`)
-4. Colocá los tres en `assets/bin/` (`yt-dlp.exe`, `ffmpeg.exe`, `deno.exe`)
+4. Place all three in `assets/bin/` (`yt-dlp.exe`, `ffmpeg.exe`, `deno.exe`)
 
-El `build` de `package.json` ya tiene `extraResources` apuntando a esa
-carpeta:
+The `build` from `package.json` already has `extraResources` pointing to that
+folder:
 
 ```json
 "extraResources": [
@@ -103,14 +101,14 @@ carpeta:
 ]
 ```
 
-Si un binario no está en `assets/bin`, la app no rompe: sigue descargándolo
-sola a su carpeta de configuración (`userData/bin`) la primera vez que hace
-falta, igual que antes. Empaquetarlos solo evita esa descarga inicial y hace
-que la app funcione sin conexión desde el primer arranque — a cambio, el
-instalador pesa bastante más. También podés forzar una redescarga/
-actualización de cualquiera de los tres desde Configuración → Actualizaciones.
+If a binary isn't in `assets/bin`, the app doesn't crash: it still downloads it
+automatically to its configuration folder (`userData/bin`) the first time it's
+needed, just like before. Bundling them simply avoids that initial download and allows
+the app to work offline from the very first launch—in exchange, the
+installer is significantly larger. You can also force a re-download or
+update of any of the three from Settings → Updates.
 
-## Estructura
+## Structure
 
 ```
 yt-dlp-interface/
@@ -124,30 +122,11 @@ yt-dlp-interface/
 └── assets/
 ```
 
-## Licencia y créditos
+## License and Credits
 
-Basado en el diseño de [yoinks](https://github.com/pablostanley/yoinks)
-de Pablo Stanley, publicado bajo licencia MIT.
+Based on the design of [yoinks](https://github.com/pablostanley/yoinks)
+by Pablo Stanley, published under the MIT license.
 
-**Nota de uso justo:** descargar contenido puede violar los términos de
-servicio de algunas plataformas — descarga solo lo que tengas derecho a
-guardar.
-
-## Presets
-
-El botón ⚙ en la barra de título abre el panel de "Opciones Predeterminadas",
-igual al de apps como media-downloader: una tabla editable de
-Sitio Web / Nombre IU / Opciones, donde "Opciones" es el comando yt-dlp
-completo (ej. `-f bestvideo[format_note*=1080p]+bestaudio` o
-`-f bestaudio --extract-audio --audio-format mp3`).
-
-- **Añadir**: completa los 3 campos y presiona "Añadir".
-- **Eliminar**: botón "eliminar" en cada fila.
-- **Establecer Predeterminados**: restaura los presets originales.
-
-Se guardan en disco (`presets.json` en la carpeta de datos de la app) y
-persisten entre sesiones.
-
-Para usarlos rápido: pega un link y usa el botón "preset ▾" junto a
-"yoink" — selecciona un preset y descarga directo con esas opciones, sin
-pasar por la lista de resoluciones.
+**Fair Use Note:** Downloading content may violate the terms of
+service of some platforms—download only what you have the right to
+save.
