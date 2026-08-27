@@ -34,25 +34,33 @@ Nota: el .exe no tiene firma digital de código (certificado de pago), así que 
 
 ![Descarga de playlist](screenshots/02.png)
 
-**Configuración de descarga**
+**Descargas en curso**
 
 ![Configuración de descarga](screenshots/03.png)
 
-**Descargas en curso**
+**Ajustes Generales**
 
 ![Descargas en curso](screenshots/04.png)
 
-**Opciones predeterminadas (presets)**
+**Configuración de descarga**
 
 ![Opciones predeterminadas](screenshots/05.png)
 
-**Panel de actualizaciones**
+**Cookies**
 
 ![Actualizaciones](screenshots/06.png)
 
-**Ventana "Acerca de"**
+**Preajustes**
 
 ![Acerca de](screenshots/07.png)
+
+**Panel de actualizaciones**
+
+![Acerca de](screenshots/08.png)
+
+**Ventana "Acerca de"**
+
+![Acerca de](screenshots/09.png)
 
 ## Requisitos para compilarlo tu mismo
 
