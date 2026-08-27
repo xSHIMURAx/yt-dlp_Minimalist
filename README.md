@@ -1,6 +1,6 @@
 # YT-DLP Minimalist
 
-![Vista principal](screenshots/Principal.gif)
+![Main View](screenshots/Principal.gif)
 
 ## A minimalist desktop interface for yt-dlp, built with Electron, that downloads videos, audio, and entire playlists from YouTube, and supports multiple platforms.
 
