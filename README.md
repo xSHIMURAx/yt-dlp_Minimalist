@@ -61,42 +61,45 @@ Both files were scanned on VirusTotal and came back clean:
 
 ## Screenshots
 
-<details>
-<summary><b>Click to expand</b></summary>
-
-<br>
-
 **Video Information and Quality Selection**
+
 ![Video Information](screenshots/01.png)
 
 **Downloading Complete Playlists**
+
 ![Download Playlist](screenshots/02.png)
 
 **Downloads in progress**
+
 ![Downloads in progress](screenshots/03.png)
 
 **General Settings**
+
 ![General Settings](screenshots/04.png)
 
 **Download Settings**
+
 ![Download Settings](screenshots/05.png)
 
 **Cookies**
+
 ![Cookies](screenshots/06.png)
 
 **Presets**
+
 ![Presets](screenshots/07.png)
 
 **Terminal mode**
+
 ![Terminal](screenshots/08.png)
 
 **Updates Panel**
+
 ![Updates Panel](screenshots/09.png)
 
 **About**
-![About](screenshots/10.png)
 
-</details>
+![About](screenshots/10.png)
 
 ## Browser Extension
 
