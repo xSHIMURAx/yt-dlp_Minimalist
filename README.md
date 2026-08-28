@@ -64,6 +64,20 @@ Both files were scanned on VirusTotal and came back clean:
 
 ![About](screenshots/10.png)
 
+## Browser Extension
+
+![extension](screenshots/extension-01.png)
+
+![extension](screenshots/extension-02.png)
+
+A companion browser extension (Chrome/Edge and other Chromium-based
+browsers) lives in the [`extension/`](./extension) folder. It sends the
+current tab's URL straight to YT-DLP Minimalist so you can queue a download
+without copying and pasting the link — the app must be running to receive it,
+and everything stays local (`127.0.0.1`, nothing leaves your computer).
+
+See [`extension/README.md`](./extension/README.md) for installation steps.
+
 ## Requirements for compiling it yourself
 
 - [Node.js](https://nodejs.org) 18 or older
@@ -123,6 +137,13 @@ yt-dlp-interface/
 │   ├── index.html
 │   ├── styles.css
 │   └── renderer.js
+├── extension/
+│   ├── manifest.json
+│   ├── background.js
+│   ├── popup.html / popup.js
+│   ├── content-overlay.js / content-overlay.css
+│   ├── options.html / options.js
+│   └── url-utils.js
 └── assets/
 ```
 
