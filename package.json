@@ -20,6 +20,12 @@
     "appId": "com.tuusuario.ytdlpinterface",
     "productName": "YT-DLP Minimalist",
     "copyright": "✿ S H I M U R A ✿",
+    "protocols": [
+      {
+        "name": "YT-DLP Minimalist Link",
+        "schemes": ["ytdlpminimalist"]
+      }
+    ],
     "win": {
       "target": [
         { "target": "nsis", "arch": ["x64"] },
@@ -32,9 +38,16 @@
       "perMachine": true,
       "allowToChangeInstallationDirectory": true
     },
+    "portable": {
+      "artifactName": "${productName} ${version} Portable.${ext}"
+    },
     "files": [
       "src/**/*",
-      "package.json"
+      "package.json",
+      "assets/icon.ico"
+    ],
+    "asarUnpack": [
+      "assets/icon.ico"
     ],
     "extraResources": [
       { "from": "assets/bin", "to": "bin" }

@@ -1,3 +1,111 @@
+// ---- Idioma (i18n) ----
+// Se aplica lo antes posible (antes de leer settings de disco) usando el
+// idioma guardado localmente para evitar un "flash" en español al abrir la
+// app; luego, cuando cargan los settings reales del panel General, se
+// re-confirma/corrige por si difiere.
+(function bootstrapLanguage() {
+  let lang = 'es';
+  try {
+    lang = localStorage.getItem('ytdlp-minimalist-lang') || 'es';
+  } catch (e) {
+    // localStorage puede no estar disponible en algunos contextos; usamos 'es' por defecto
+  }
+  window.i18n.setLanguage(lang);
+})();
+
+function applyLanguage(lang) {
+  window.i18n.setLanguage(lang);
+  try {
+    localStorage.setItem('ytdlp-minimalist-lang', lang);
+  } catch (e) {
+    // si falla el guardado local no es crítico, solo no persiste entre sesiones
+  }
+  window.i18n.applyTranslations(document);
+
+  // Re-pintar listas armadas dinámicamente (no usan data-i18n, así que
+  // applyTranslations no las toca): el historial guardado en disco puede
+  // traer "labels" en el idioma viejo (ver translateKnownText en i18n.js),
+  // y la lista de descargas activas usa textos de estado generados en JS.
+  // Sin esto, ambas quedaban "congeladas" en el idioma que estaba activo
+  // cuando se pintaron por última vez hasta que el usuario cambiaba de
+  // pestaña manualmente.
+  if (typeof refreshAllHistoryTabsFromDisk === 'function') refreshAllHistoryTabsFromDisk();
+  if (typeof renderDownloadsPanel === 'function') renderDownloadsPanel();
+
+  // Igual problema en la pantalla de calidades: las filas incorporadas
+  // ("Mejor video y audio disponible", "Mejor audio disponible", "Alta/Media/Baja")
+  // se arman una sola vez al abrir esa pantalla (buildDownloadOptions) y su
+  // texto queda guardado tal cual en formatItems, así que si el usuario
+  // cambia de idioma sin salir de esa pantalla, esas filas no se retraducían
+  // aunque el resto de la UI sí. Re-traducimos in-place y volvemos a pintar.
+  if (typeof formatItems !== 'undefined' && formatItems.length) {
+    formatItems.forEach((opt) => {
+      if (opt.res) opt.res = window.i18n.translateKnownText(opt.res);
+    });
+    if (typeof renderDownloadList === 'function') {
+      renderDownloadList();
+    }
+  }
+
+  // Mismo problema en las "píldoras" de estadísticas (Duración/Vistas/Likes/
+  // Publicado): sus etiquetas se escriben una sola vez como texto plano al
+  // consultar el video (renderStatsPills), tanto en la pantalla de calidades
+  // como en el panel de Información. currentVideoInfo guarda los datos crudos
+  // del último video consultado, así que alcanza con volver a armarlas.
+  if (typeof currentVideoInfo !== 'undefined' && currentVideoInfo && typeof renderStatsPills === 'function') {
+    if (typeof videoMetaStatsEl !== 'undefined' && videoMetaStatsEl) renderStatsPills(videoMetaStatsEl, currentVideoInfo);
+    if (typeof videoInfoStatsEl !== 'undefined' && videoInfoStatsEl) renderStatsPills(videoInfoStatsEl, currentVideoInfo);
+  }
+
+  // La tabla de presets (panel ⚙) tiene el mismo problema cuando está vacía:
+  // el "Sin presets todavía." se escribe una sola vez como texto plano y no
+  // se retraduce solo. Cuando SÍ hay presets, cada fila ya usa data-i18n /
+  // se regenera con botones traducidos dinámicamente al abrirse, así que
+  // alcanza con volver a pintar la tabla completa.
+  if (typeof renderPresetsTable === 'function' && typeof presets !== 'undefined') {
+    renderPresetsTable();
+  }
+  // Mismo caso con el desplegable de presets del selector de calidad (si
+  // llegara a estar abierto justo al cambiar de idioma).
+  if (typeof populatePresetDropdown === 'function') {
+    populatePresetDropdown();
+  }
+
+  // Panel "Referencia de comandos" de la Terminal: la lista de comandos
+  // (window.YTDLP_COMMANDS_ES / _EN) se pinta a mano con textContent y no
+  // usa data-i18n, así que si el panel está abierto al cambiar de idioma
+  // hay que volver a renderizarla para que categorías y descripciones
+  // reflejen el idioma nuevo.
+  if (
+    typeof terminalReferenceOverlay !== 'undefined' &&
+    terminalReferenceOverlay &&
+    !terminalReferenceOverlay.classList.contains('hidden') &&
+    typeof renderTerminalReferenceList === 'function'
+  ) {
+    renderTerminalReferenceList(terminalReferenceSearchEl ? terminalReferenceSearchEl.value : '');
+  }
+}
+
+// Vuelve a pedir el historial completo al disco y repinta las 4 pestañas
+// (Historial, Completadas, Error, Cancelado) con el idioma actual.
+async function refreshAllHistoryTabsFromDisk() {
+  let history = [];
+  try {
+    history = (await window.yoinksAPI.listHistory()) || [];
+  } catch (e) {
+    history = [];
+  }
+  renderAllHistoryTabs(history);
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  window.i18n.applyTranslations(document);
+});
+// Por si el script corre después de que el DOM ya esté listo.
+if (document.readyState === 'interactive' || document.readyState === 'complete') {
+  window.i18n.applyTranslations(document);
+}
+
 // ---- Controles de la barra de título ----
 document.getElementById('btn-min').addEventListener('click', () => window.yoinksAPI.minimize());
 document.getElementById('btn-close').addEventListener('click', () => window.yoinksAPI.close());
@@ -123,8 +231,11 @@ backBtn.addEventListener('click', goToHomeScreen);
 // Elementos de presets (panel ⚙)
 const settingsBtn = document.getElementById('btn-presets');
 const settingsMenu = document.getElementById('settings-menu');
+const menuGeneral = document.getElementById('menu-general');
 const menuDownload = document.getElementById('menu-download');
+const menuCookies = document.getElementById('menu-cookies');
 const menuPresets = document.getElementById('menu-presets');
+const menuTerminal = document.getElementById('menu-terminal');
 const menuUpdates = document.getElementById('menu-updates');
 const menuAbout = document.getElementById('menu-about');
 const presetsOverlay = document.getElementById('presets-overlay');
@@ -136,6 +247,21 @@ const presetOptionsInput = document.getElementById('preset-options');
 const presetsAddBtn = document.getElementById('presets-add-btn');
 const presetsResetBtn = document.getElementById('presets-reset-btn');
 const presetsCancelEditBtn = document.getElementById('presets-cancel-edit-btn');
+const presetsReferenceBtn = document.getElementById('presets-reference-btn');
+
+// Elementos del panel de Terminal (ejecutar un comando de yt-dlp "en crudo")
+const terminalOverlay = document.getElementById('terminal-overlay');
+const terminalCloseBtn = document.getElementById('terminal-close-btn');
+const terminalOutputEl = document.getElementById('terminal-output');
+const terminalCommandInput = document.getElementById('terminal-command-input');
+const terminalRunBtn = document.getElementById('terminal-run-btn');
+const terminalStopBtn = document.getElementById('terminal-stop-btn');
+const terminalQuickCommandsEl = document.getElementById('terminal-quick-commands');
+const terminalReferenceBtn = document.getElementById('terminal-reference-btn');
+const terminalReferenceOverlay = document.getElementById('terminal-reference-overlay');
+const terminalReferenceCloseBtn = document.getElementById('terminal-reference-close-btn');
+const terminalReferenceSearchEl = document.getElementById('terminal-reference-search');
+const terminalReferenceListEl = document.getElementById('terminal-reference-list');
 
 // Elementos de Configuración de Descarga (panel ⚙ → Download)
 const downloadSettingsOverlay = document.getElementById('download-settings-overlay');
@@ -146,6 +272,11 @@ const settingDownloadPathInput = document.getElementById('setting-download-path'
 const settingPathBrowseBtn = document.getElementById('setting-path-browse-btn');
 const settingOutputTemplateInput = document.getElementById('setting-output-template');
 const settingCookiesSiteSelect = document.getElementById('setting-cookies-site');
+const settingCookiesRemoveSiteBtn = document.getElementById('setting-cookies-remove-site-btn');
+const settingNewSiteNameInput = document.getElementById('setting-new-site-name');
+const settingNewSiteUrlInput = document.getElementById('setting-new-site-url');
+const settingAddSiteBtn = document.getElementById('setting-add-site-btn');
+const settingAddSiteError = document.getElementById('setting-add-site-error');
 const settingCookiesModeSelect = document.getElementById('setting-cookies-mode');
 const settingCookiesBrowserRow = document.getElementById('setting-cookies-browser-row');
 const settingCookiesBrowserSelect = document.getElementById('setting-cookies-browser');
@@ -157,8 +288,24 @@ const settingLoginBtn = document.getElementById('setting-login-btn');
 const settingLoginLogoutBtn = document.getElementById('setting-login-logout-btn');
 const settingLoginStatusEl = document.getElementById('setting-login-status');
 const settingRateLimitInput = document.getElementById('setting-rate-limit');
+const settingRateLimitModeSelect = document.getElementById('setting-rate-limit-mode');
 const settingConcurrentDownloadsSelect = document.getElementById('setting-concurrent-downloads');
 const settingSoundEnabledCheckbox = document.getElementById('setting-sound-enabled');
+const settingSoundStyleSelect = document.getElementById('setting-sound-style');
+const settingCloseBehaviorSelect = document.getElementById('setting-close-behavior');
+const settingLanguageSelect = document.getElementById('setting-language');
+
+// Elementos del panel de Cookies (panel ⚙ → Cookies)
+const cookiesOverlay = document.getElementById('cookies-overlay');
+const cookiesCloseBtn = document.getElementById('cookies-close-btn');
+const cookiesSaveBtn = document.getElementById('cookies-save-btn');
+const cookiesResetBtn = document.getElementById('cookies-reset-btn');
+
+// Elementos del panel General (panel ⚙ → General)
+const generalOverlay = document.getElementById('general-overlay');
+const generalCloseBtn = document.getElementById('general-close-btn');
+const generalSaveBtn = document.getElementById('general-save-btn');
+const generalResetBtn = document.getElementById('general-reset-btn');
 
 // Elementos del panel de Actualizaciones (yt-dlp / FFmpeg)
 const updatesOverlay = document.getElementById('updates-overlay');
@@ -213,6 +360,8 @@ const activityPanelHistory = document.getElementById('activity-panel-history');
 const downloadsListEl = document.getElementById('downloads-list');
 const downloadsEmptyEl = document.getElementById('downloads-empty');
 const downloadsToolbarEl = document.getElementById('downloads-toolbar');
+const downloadsSpeedSummaryEl = document.getElementById('downloads-speed-summary');
+const downloadsSpeedSummaryTextEl = document.getElementById('downloads-speed-summary-text');
 const downloadsSelectAllCheckbox = document.getElementById('downloads-select-all');
 const downloadsPauseBtn = document.getElementById('downloads-pause-btn');
 const downloadsResumeBtn = document.getElementById('downloads-resume-btn');
@@ -233,6 +382,10 @@ const historyClearBtn = document.getElementById('history-clear-btn');
 
 let presets = [];
 let currentUrl = '';
+// downloadId "dueño" actual del mensaje de estado en la pantalla de picker.
+// Evita que el progreso de una descarga anterior (o de otro video) siga
+// escribiendo en el mismo status cuando ya se cambió de pantalla/video.
+let currentPickerStatusOwner = null;
 let currentVideoInfo = null; // { title, extractor_key } del último video consultado
 let formatItems = []; // formatos detectados del video (+ audio only)
 
@@ -290,29 +443,111 @@ clearUrlBtn.addEventListener('click', () => {
 pasteUrlBtn.addEventListener('click', async () => {
   try {
     pasteUrlBtn.disabled = true;
-    pasteUrlBtn.textContent = 'leyendo...';
+    pasteUrlBtn.textContent = window.i18n.t('reading_clipboard');
     
     const text = await window.yoinksAPI.readClipboard();
     
     if (text && text.trim()) {
       input.value = text.trim();
       updateClearBtnVisibility();
-      setStatus('Link pegado correctamente', 'success', 'home');
+      setStatus(window.i18n.t('link_pasted'), 'success', 'home');
       setTimeout(() => setStatus('', '', 'home'), 2000);
     } else {
-      setStatus('El portapapeles está vacío', 'error', 'home');
+      setStatus(window.i18n.t('clipboard_empty'), 'error', 'home');
     }
     input.focus();
   } catch (err) {
-    setStatus('Error: ' + err.message, 'error', 'home');
+    setStatus(window.i18n.t('generic_error', { error: err.message }), 'error', 'home');
     console.error('Clipboard error:', err);
   } finally {
     pasteUrlBtn.disabled = false;
-    pasteUrlBtn.textContent = 'paste';
+    pasteUrlBtn.textContent = window.i18n.t('btn_paste');
   }
 });
 
 updateClearBtnVisibility(); // estado inicial (por si el input trae algo precargado)
+
+// ---- URL enviada desde la extensión del navegador ----
+// main.js puede reenviar el mismo link de arranque en frío varias veces
+// (cada ~400ms) hasta que le confirmemos que lo aplicamos — así no importa
+// si el primer envío llega antes de que este script termine de cargar.
+// 'lastAppliedExtensionUrl' evita que un reenvío duplicado (que sí puede
+// llegar por una condición de carrera minúscula entre el ack y el próximo
+// tick del intervalo) pegue el link de nuevo y dispare handleYoink() dos
+// veces. Sí queremos, en cambio, poder recibir un link *distinto* al que
+// ya estábamos mostrando (por eso no es simplemente "ignorar todo").
+let lastAppliedExtensionUrl = null;
+
+function applyExtensionUrl(url) {
+  console.log('[extension-debug] applyExtensionUrl llamado con', url, 'lastAppliedExtensionUrl=', lastAppliedExtensionUrl);
+  if (!url || url === lastAppliedExtensionUrl) return;
+  lastAppliedExtensionUrl = url;
+  goToHomeScreen();
+  input.value = url;
+  updateClearBtnVisibility();
+  setStatus(window.i18n.t('link_from_extension'), 'success', 'home');
+  handleYoink();
+  if (window.yoinksAPI.ackExtensionUrl) window.yoinksAPI.ackExtensionUrl();
+  // Solo bloqueamos duplicados por un ratito (cubre la ventana en la que
+  // main.js podría reenviar el mismo link una vez más antes de recibir el
+  // ack); pasado eso, un envío nuevo del mismo video vuelve a funcionar.
+  setTimeout(() => {
+    if (lastAppliedExtensionUrl === url) lastAppliedExtensionUrl = null;
+  }, 2000);
+}
+
+// Si ya estábamos en la pantalla de calidades (viendo otro video), primero
+// volvemos a la pantalla principal para que se vea el link pegado antes de
+// pasar a buscar los formatos del nuevo video.
+window.yoinksAPI.onExtensionUrl((url) => {
+  console.log('[extension-debug] evento extension:url recibido con', url);
+  applyExtensionUrl(url);
+});
+
+// Si la app se acaba de abrir a partir de un link "ytdlpminimalist://..."
+// (el usuario le dio "Descargar" en la extensión sin tener la app abierta),
+// lo pedimos apenas terminamos de inicializar en vez de esperar a que
+// main.js nos lo empuje justo a tiempo — así no importa si el renderer
+// tarda un poco más en arrancar, el link no se pierde.
+(async function checkPendingExtensionUrl() {
+  try {
+    const pendingUrl = await window.yoinksAPI.getPendingExtensionUrl();
+    if (pendingUrl) applyExtensionUrl(pendingUrl);
+  } catch (e) {
+    // No había link pendiente, o falló la consulta; no hacemos nada.
+  }
+})();
+
+// ---- Diálogo "¿Qué querés hacer?" al presionar ✕ (closeBehavior = 'ask') ----
+const closeBehaviorOverlay = document.getElementById('close-behavior-overlay');
+const closeBehaviorRememberCheckbox = document.getElementById('close-behavior-remember');
+const closeBehaviorCancelBtn = document.getElementById('close-behavior-cancel-btn');
+const closeBehaviorCloseBtn = document.getElementById('close-behavior-close-btn');
+const closeBehaviorMinimizeBtn = document.getElementById('close-behavior-minimize-btn');
+
+function respondCloseBehavior(action) {
+  closeBehaviorOverlay.classList.add('hidden');
+  window.yoinksAPI.respondCloseBehavior({ action, remember: closeBehaviorRememberCheckbox.checked });
+  closeBehaviorRememberCheckbox.checked = false;
+}
+
+closeBehaviorMinimizeBtn.addEventListener('click', () => respondCloseBehavior('minimize'));
+closeBehaviorCloseBtn.addEventListener('click', () => respondCloseBehavior('close'));
+closeBehaviorCancelBtn.addEventListener('click', () => respondCloseBehavior('cancel'));
+closeBehaviorOverlay.addEventListener('click', (e) => {
+  if (e.target === closeBehaviorOverlay) respondCloseBehavior('cancel');
+});
+
+window.yoinksAPI.onAskCloseBehavior(() => {
+  closeBehaviorOverlay.classList.remove('hidden');
+  closeBehaviorMinimizeBtn.focus();
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !closeBehaviorOverlay.classList.contains('hidden')) {
+    respondCloseBehavior('cancel');
+  }
+});
 
 // Reintenta una función asíncrona hasta `maxRetries` veces extra (con una
 // pequeña pausa entre intentos) antes de rendirse. Sirve para fallos
@@ -341,7 +576,7 @@ async function withRetries(fn, { maxRetries = 2, delayMs = 1500, onRetry } = {})
 async function handleYoink() {
   const url = input.value.trim();
   if (!url) {
-    setStatus('Pega un link primero.', 'error', 'home');
+    setStatus(window.i18n.t('paste_link_first'), 'error', 'home');
     return;
   }
 
@@ -351,19 +586,19 @@ async function handleYoink() {
   const playlistId = getPlaylistId(url);
   if (playlistId) {
     yoinkBtn.disabled = true;
-    setStatus('Cargando playlist…', 'loading', 'home');
+    setStatus(window.i18n.t('loading_playlist'), 'loading', 'home');
     try {
       const result = await withRetries(() => window.yoinksAPI.fetchPlaylist(url), {
         maxRetries: 2,
         delayMs: 1500,
         onRetry: (attempt, total) =>
-          setStatus(`No respondió, reintentando… (${attempt}/${total})`, 'loading', 'home'),
+          setStatus(window.i18n.t('no_response_retrying', { attempt, total }), 'loading', 'home'),
       });
       renderPlaylist(result);
       setStatus('', '', 'home');
       goToPlaylistScreen();
     } catch (err) {
-      setStatus('No se pudo leer la playlist: ' + err.message, 'error', 'home');
+      setStatus(window.i18n.t('could_not_read_playlist', { error: err.message }), 'error', 'home');
     } finally {
       yoinkBtn.disabled = false;
     }
@@ -371,24 +606,25 @@ async function handleYoink() {
   }
 
   yoinkBtn.disabled = true;
-  setStatus('Buscando formatos disponibles…', 'loading', 'home');
+  setStatus(window.i18n.t('searching_formats'), 'loading', 'home');
 
   try {
     const info = await withRetries(() => window.yoinksAPI.fetchFormats(url), {
       maxRetries: 2,
       delayMs: 1500,
       onRetry: (attempt, total) =>
-        setStatus(`No respondió, reintentando… (${attempt}/${total})`, 'loading', 'home'),
+        setStatus(window.i18n.t('no_response_retrying', { attempt, total }), 'loading', 'home'),
     });
     currentVideoInfo = info;
     renderVideoMeta(info);
     buildDownloadOptions(info);
     renderDownloadList();
     setStatus('', '', 'home');
+    currentPickerStatusOwner = null; // este picker ya no pertenece a la descarga anterior
     setStatus('', '', 'picker');
     goToPickerScreen(); // ---- transición a la "segunda pantalla" con los formatos/presets ----
   } catch (err) {
-    setStatus('No se pudo leer el link: ' + err.message, 'error', 'home');
+    setStatus(window.i18n.t('could_not_read_link', { error: err.message }), 'error', 'home');
   } finally {
     yoinkBtn.disabled = false;
   }
@@ -416,7 +652,7 @@ function pickThumbnailUrl(info) {
 }
 
 function renderVideoMeta(info) {
-  videoTitleEl.textContent = info.title || 'Sin título';
+  videoTitleEl.textContent = info.title || window.i18n.t('no_title');
 
   const thumbUrl = pickThumbnailUrl(info);
   if (thumbUrl) {
@@ -443,13 +679,13 @@ infoBtn.addEventListener('click', handleVideoInfo);
 async function handleVideoInfo() {
   const url = input.value.trim();
   if (!url) {
-    setStatus('Pega un link primero.', 'error', 'home');
+    setStatus(window.i18n.t('paste_link_first'), 'error', 'home');
     return;
   }
 
   infoBtn.disabled = true;
   const originalLabel = infoBtn.textContent;
-  infoBtn.textContent = 'consultando...';
+  infoBtn.textContent = window.i18n.t('querying');
   setStatus('', '', 'home');
 
   try {
@@ -458,20 +694,20 @@ async function handleVideoInfo() {
       const result = await withRetries(() => window.yoinksAPI.fetchPlaylist(url), {
         maxRetries: 2,
         delayMs: 1500,
-        onRetry: (attempt, total) => (infoBtn.textContent = `reintentando (${attempt}/${total})…`),
+        onRetry: (attempt, total) => (infoBtn.textContent = window.i18n.t('retrying', { attempt, total })),
       });
       renderVideoInfoPlaylist(result, url);
     } else {
       const info = await withRetries(() => window.yoinksAPI.fetchFormats(url), {
         maxRetries: 2,
         delayMs: 1500,
-        onRetry: (attempt, total) => (infoBtn.textContent = `reintentando (${attempt}/${total})…`),
+        onRetry: (attempt, total) => (infoBtn.textContent = window.i18n.t('retrying', { attempt, total })),
       });
       renderVideoInfoSingle(info, url);
     }
     openVideoInfoPanel();
   } catch (err) {
-    setStatus('No se pudo obtener la información: ' + err.message, 'error', 'home');
+    setStatus(window.i18n.t('could_not_get_info', { error: err.message }), 'error', 'home');
   } finally {
     infoBtn.disabled = false;
     infoBtn.textContent = originalLabel;
@@ -482,7 +718,7 @@ async function handleVideoInfo() {
 function formatCount(n) {
   if (n === null || n === undefined || n === '' || isNaN(n)) return null;
   try {
-    return Number(n).toLocaleString('es');
+    return Number(n).toLocaleString(window.i18n.getLanguage() === 'en' ? 'en' : 'es');
   } catch (e) {
     return String(n);
   }
@@ -517,20 +753,20 @@ function addVideoInfoStat(container, label, value) {
 function renderStatsPills(container, info) {
   container.innerHTML = '';
   const duration = formatDuration(info.duration);
-  if (duration) addVideoInfoStat(container, 'Duración', duration);
+  if (duration) addVideoInfoStat(container, window.i18n.t('stat_duration'), duration);
   const views = formatCount(info.view_count);
-  if (views) addVideoInfoStat(container, 'Vistas', views);
+  if (views) addVideoInfoStat(container, window.i18n.t('stat_views'), views);
   const likes = formatCount(info.like_count);
-  if (likes) addVideoInfoStat(container, 'Likes', likes);
+  if (likes) addVideoInfoStat(container, window.i18n.t('stat_likes'), likes);
   const uploadDate = formatUploadDate(info.upload_date);
-  if (uploadDate) addVideoInfoStat(container, 'Publicado', uploadDate);
+  if (uploadDate) addVideoInfoStat(container, window.i18n.t('stat_published'), uploadDate);
 }
 
 // Lista de resoluciones de video detectadas (sin traer/descargar nada, solo lo que ya viene en el JSON de metadatos)
 function buildResolutionsSummary(info) {
   const videoFormats = (info.formats || []).filter((f) => f.vcodec && f.vcodec !== 'none' && f.height);
   const heights = [...new Set(videoFormats.map((f) => f.height))].sort((a, b) => b - a);
-  if (!heights.length) return 'No se detectaron formatos de video (puede ser solo audio).';
+  if (!heights.length) return window.i18n.t('no_video_formats_detected');
   return heights.map((h) => `${h}p`).join(' · ');
 }
 
@@ -550,7 +786,7 @@ function renderVideoInfoSingle(info, url) {
     videoInfoThumbEl.classList.add('hidden');
   }
 
-  videoInfoTitleEl.textContent = info.title || 'Sin título';
+  videoInfoTitleEl.textContent = info.title || window.i18n.t('no_title');
 
   const uploader = info.uploader || info.channel || '';
   const uploaderUrl = info.uploader_url || info.channel_url || '';
@@ -576,13 +812,13 @@ function renderVideoInfoSingle(info, url) {
   videoInfoFormatsEl.textContent = buildResolutionsSummary(info);
 
   const description = (info.description || '').trim();
-  videoInfoDescriptionEl.textContent = description || 'Sin descripción.';
+  videoInfoDescriptionEl.textContent = description || window.i18n.t('no_description');
 
   const link = info.webpage_url || url;
   videoInfoLinkEl.textContent = link;
   videoInfoLinkEl.href = link;
 
-  videoInfoDownloadBtn.textContent = 'Descargar este video';
+  videoInfoDownloadBtn.textContent = window.i18n.t('btn_download_this_video');
   setVideoInfoStatus('');
 }
 
@@ -596,7 +832,7 @@ function renderVideoInfoPlaylist(result, url) {
   videoInfoThumbEl.classList.add('hidden');
   videoInfoThumbEl.removeAttribute('src');
 
-  videoInfoTitleEl.textContent = result.title || 'Playlist';
+  videoInfoTitleEl.textContent = result.title || window.i18n.t('playlist_default_title');
   videoInfoUploaderEl.classList.add('hidden');
   videoInfoSiteEl.classList.add('hidden');
 
@@ -605,23 +841,27 @@ function renderVideoInfoPlaylist(result, url) {
 
   videoInfoPlaylistListEl.innerHTML = '';
   const entries = result.entries || [];
-  entries.slice(0, 50).forEach((entry, i) => {
+  entries.slice(0, 50).forEach((entry) => {
     const row = document.createElement('div');
     row.className = 'video-info-playlist-row';
-    row.textContent = `${i + 1}. ${entry.title}`;
+    row.innerHTML = `
+      <img class="video-info-playlist-thumb" src="${escapeHtml(entry.thumbnail || '')}" alt="" onerror="this.style.visibility='hidden'" />
+      <span class="video-info-playlist-title">${escapeHtml(entry.title)}</span>
+      <span class="video-info-playlist-duration">${entry.duration ? formatDuration(entry.duration) : ''}</span>
+    `;
     videoInfoPlaylistListEl.appendChild(row);
   });
   if (entries.length > 50) {
     const more = document.createElement('div');
     more.className = 'video-info-playlist-row video-info-playlist-more';
-    more.textContent = `… y ${entries.length - 50} más`;
+    more.textContent = window.i18n.t('and_n_more', { n: entries.length - 50 });
     videoInfoPlaylistListEl.appendChild(more);
   }
 
   videoInfoLinkEl.textContent = url;
   videoInfoLinkEl.href = url;
 
-  videoInfoDownloadBtn.textContent = 'Ver lista de videos';
+  videoInfoDownloadBtn.textContent = window.i18n.t('view_video_list');
   setVideoInfoStatus('');
 }
 
@@ -678,22 +918,22 @@ function buildVideoInfoText(ctx) {
 
   const info = ctx.info;
   const lines = [];
-  lines.push(`Título: ${info.title || ''}`);
+  lines.push(`${window.i18n.t('copy_info_title')}: ${info.title || ''}`);
   const uploader = info.uploader || info.channel || '';
-  if (uploader) lines.push(`Canal: ${uploader}`);
-  if (info.extractor_key) lines.push(`Sitio: ${info.extractor_key}`);
+  if (uploader) lines.push(`${window.i18n.t('copy_info_channel')}: ${uploader}`);
+  if (info.extractor_key) lines.push(`${window.i18n.t('copy_info_site')}: ${info.extractor_key}`);
   const duration = formatDuration(info.duration);
-  if (duration) lines.push(`Duración: ${duration}`);
+  if (duration) lines.push(`${window.i18n.t('stat_duration')}: ${duration}`);
   const views = formatCount(info.view_count);
-  if (views) lines.push(`Vistas: ${views}`);
+  if (views) lines.push(`${window.i18n.t('stat_views')}: ${views}`);
   const likes = formatCount(info.like_count);
-  if (likes) lines.push(`Likes: ${likes}`);
+  if (likes) lines.push(`${window.i18n.t('stat_likes')}: ${likes}`);
   const uploadDate = formatUploadDate(info.upload_date);
-  if (uploadDate) lines.push(`Publicado: ${uploadDate}`);
-  lines.push(`Resoluciones: ${buildResolutionsSummary(info)}`);
-  lines.push(`Enlace: ${info.webpage_url || ctx.url}`);
+  if (uploadDate) lines.push(`${window.i18n.t('stat_published')}: ${uploadDate}`);
+  lines.push(`${window.i18n.t('copy_info_resolutions')}: ${buildResolutionsSummary(info)}`);
+  lines.push(`${window.i18n.t('copy_info_link')}: ${info.webpage_url || ctx.url}`);
   const description = (info.description || '').trim();
-  if (description) lines.push('', 'Descripción:', description);
+  if (description) lines.push('', `${window.i18n.t('copy_info_description')}:`, description);
   return lines.join('\n');
 }
 
@@ -820,7 +1060,7 @@ function buildDownloadOptions(info) {
   // aunque tenga la misma resolución.
   const topSize = combineSizeEstimates(estimateSizeBytes(topFormat, info.duration), bestAudioSize);
   formatItems.push({
-    res: 'Mejor video y audio disponible',
+    res: window.i18n.t('best_video_audio'),
     ext: 'mp4',
     size: formatSizeLabel(topSize),
     formatId: topFormat ? `${topFormat.format_id}+bestaudio/best` : 'bestvideo+bestaudio/best',
@@ -832,7 +1072,7 @@ function buildDownloadOptions(info) {
   // ---- Opción predefinida "Mejor audio disponible (MP3)", justo debajo de la anterior ----
   const approxBestAudioSize = bestAudioSize ? { ...bestAudioSize, approx: true } : null;
   formatItems.push({
-    res: 'Mejor audio disponible',
+    res: window.i18n.t('best_audio'),
     ext: 'mp3',
     size: formatSizeLabel(approxBestAudioSize),
     formatId: null,
@@ -865,9 +1105,9 @@ function buildDownloadOptions(info) {
   // (bitrate objetivo al que se re-codifica el audio; el formato de salida
   // sigue siendo elegible con el select de la columna "Formato", por defecto MP3).
   const audioQualityOptions = [
-    { res: 'Alta', bitrateKbps: 192 },
-    { res: 'Media', bitrateKbps: 128 },
-    { res: 'Baja', bitrateKbps: 64 },
+    { res: window.i18n.t('audio_quality_high'), bitrateKbps: 192 },
+    { res: window.i18n.t('audio_quality_medium'), bitrateKbps: 128 },
+    { res: window.i18n.t('audio_quality_low'), bitrateKbps: 64 },
   ];
   for (const aq of audioQualityOptions) {
     // Tamaño estimado a partir del bitrate objetivo de cada nivel (no del
@@ -961,6 +1201,10 @@ function computePresetItemsForCurrentSite(info) {
 
   return presets
     .filter((p) => {
+      // Las dos entradas "builtin" (Mejor video y audio / Mejor audio) ya se
+      // muestran siempre como las filas ★ incorporadas al inicio de la lista
+      // (ver buildDownloadOptions); se excluyen acá para no duplicarlas.
+      if (p.builtin) return false;
       const site = (p.site || '').trim().toLowerCase();
       return !site || site === currentSite || site === 'todos' || site === 'all';
     })
@@ -983,15 +1227,18 @@ function populatePresetDropdown() {
   if (!presets || presets.length === 0) {
     const emptyItem = document.createElement('div');
     emptyItem.className = 'preset-dropdown-item';
-    emptyItem.textContent = 'Sin preajustes guardados';
+    emptyItem.textContent = window.i18n.t('no_saved_presets');
     emptyItem.style.cursor = 'default';
     presetDropdownList.appendChild(emptyItem);
     return;
   }
   
-  // Filtrar preajustes por sitio del video actual
+  // Filtrar preajustes por sitio del video actual (y excluir los "builtin":
+  // ya están siempre visibles como las filas ★ del listado principal, no
+  // hace falta duplicarlos acá).
   const currentSite = (currentVideoInfo?.extractor_key || '').trim().toLowerCase();
   const applicablePresets = presets.filter((p) => {
+    if (p.builtin) return false;
     const site = (p.site || '').trim().toLowerCase();
     return !site || site === currentSite || site === 'todos' || site === 'all';
   });
@@ -999,7 +1246,7 @@ function populatePresetDropdown() {
   if (applicablePresets.length === 0) {
     const emptyItem = document.createElement('div');
     emptyItem.className = 'preset-dropdown-item';
-    emptyItem.textContent = 'Sin preajustes para este sitio';
+    emptyItem.textContent = window.i18n.t('no_presets_for_site');
     emptyItem.style.cursor = 'default';
     presetDropdownList.appendChild(emptyItem);
     return;
@@ -1015,7 +1262,7 @@ function populatePresetDropdown() {
     
     const site = document.createElement('span');
     site.className = 'preset-dropdown-item-site';
-    site.textContent = preset.site || 'Todos';
+    site.textContent = preset.site || window.i18n.t('preset_all_sites');
     
     item.appendChild(name);
     item.appendChild(site);
@@ -1074,8 +1321,8 @@ function renderDownloadList() {
   // ---- Categoría "Preajuste": los 2 incorporados + los preajustes guardados por el usuario ----
   const presetDivider = document.createElement('div');
   presetDivider.className = 'download-divider glitch-text';
-  presetDivider.textContent = 'Preajuste';
-  presetDivider.dataset.text = 'Preajuste';
+  presetDivider.textContent = window.i18n.t('preset_divider');
+  presetDivider.dataset.text = window.i18n.t('preset_divider');
   downloadListInner.appendChild(presetDivider);
 
   formatItems.forEach((opt, i) => {
@@ -1089,16 +1336,16 @@ function renderDownloadList() {
   // ---- Categoría "Formatos detectados": resoluciones de video + audio ----
   const formatsDivider = document.createElement('div');
   formatsDivider.className = 'download-divider download-divider-section glitch-text';
-  formatsDivider.textContent = 'Formatos detectados';
-  formatsDivider.dataset.text = 'Formatos detectados';
+  formatsDivider.textContent = window.i18n.t('formats_detected');
+  formatsDivider.dataset.text = window.i18n.t('formats_detected');
   downloadListInner.appendChild(formatsDivider);
 
   const header = document.createElement('div');
   header.className = 'download-columns-header';
   header.innerHTML = `
-    <span class="col-res">Calidad</span>
-    <span class="col-ext">Formato</span>
-    <span class="col-size">Peso</span>
+    <span class="col-res">${window.i18n.t('col_quality')}</span>
+    <span class="col-ext">${window.i18n.t('col_format')}</span>
+    <span class="col-size">${window.i18n.t('col_size')}</span>
   `;
   downloadListInner.appendChild(header);
 
@@ -1130,18 +1377,28 @@ function appendOptionRow(opt, i) {
     // también permiten elegir formato de salida, igual que las filas normales.
     const formatOptions = opt.audioOnly ? AUDIO_FORMATS : CONTAINER_FORMATS;
     const formatSelectHtml = opt.isBest
-      ? `<select class="ext-select preset-ext-select" data-idx="${i}" title="Formato de salida">
+      ? `<select class="ext-select preset-ext-select" data-idx="${i}" title="${window.i18n.t('output_format_tooltip')}">
           ${formatOptions.map((fmt) => `<option value="${fmt}" ${opt.ext === fmt ? 'selected' : ''}>${fmt.toUpperCase()}</option>`).join('')}
         </select>`
       : '';
+    // Los dos preajustes incorporados ("Mejor video y audio" / "Mejor audio")
+    // agrupan el select de formato + el peso estimado en un solo bloque para
+    // que ambos se empujen juntos al extremo derecho de la fila (ver
+    // .preset-best-trailing en styles.css). Los preajustes guardados por el
+    // usuario siguen mostrando el tamaño suelto, como antes.
+    const trailingHtml = opt.isBest
+      ? `<span class="preset-best-trailing">
+          ${formatSelectHtml}
+          ${opt.size ? `<span class="size">${opt.size}</span>` : ''}
+        </span>`
+      : (opt.size ? `<span class="size">${opt.size}</span>` : '');
     row.innerHTML = `
       <span class="arrow">${i === selectedIndex ? '&gt;' : ''}</span>
       <span class="arrow">★</span>
       <span class="res">${opt.res}</span>
       ${showSummary ? `<span class="preset-summary">${opt.summary}</span>` : ''}
       ${!opt.isBest && !showSummary ? '<span class="tag">preset</span>' : ''}
-      ${formatSelectHtml}
-      ${!opt.isBest && opt.size ? `<span class="size">${opt.size}</span>` : ''}
+      ${trailingHtml}
     `;
   } else {
     const icon = opt.audioOnly ? '♪' : '▸';
@@ -1151,7 +1408,7 @@ function appendOptionRow(opt, i) {
     // Las filas de audio también permiten elegir formato de salida (mp3/m4a/opus);
     // las de video, el contenedor (mp4/mkv/webm/mov).
     const formatOptions = opt.audioOnly ? AUDIO_FORMATS : CONTAINER_FORMATS;
-    const extCell = `<select class="ext-select" data-idx="${i}" title="Formato de salida">
+    const extCell = `<select class="ext-select" data-idx="${i}" title="${window.i18n.t('output_format_tooltip')}">
           ${formatOptions.map((fmt) => `<option value="${fmt}" ${opt.ext === fmt ? 'selected' : ''}>${fmt.toUpperCase()}</option>`).join('')}
         </select>`;
     row.innerHTML = `
@@ -1218,7 +1475,7 @@ let playlistEntries = []; // [{ id, title, url, duration, thumbnail, selected, s
 
 function renderPlaylist(result) {
   playlistEntries = (result.entries || []).map((e) => ({ ...e, selected: true }));
-  playlistTitleEl.textContent = result.title || 'Playlist';
+  playlistTitleEl.textContent = result.title || window.i18n.t('playlist_default_title');
   playlistCountEl.textContent = `${playlistEntries.length} video${playlistEntries.length === 1 ? '' : 's'}`;
   playlistSelectAllEl.checked = true;
   statusPlaylistEl.textContent = '';
@@ -1327,7 +1584,7 @@ playlistDownloadBtn.addEventListener('click', async () => {
     .filter(({ entry }) => entry.selected);
 
   if (selected.length === 0) {
-    statusPlaylistEl.textContent = 'Selecciona al menos un video.';
+    statusPlaylistEl.textContent = window.i18n.t('select_at_least_one_video');
     statusPlaylistEl.className = 'status error';
     return;
   }
@@ -1373,8 +1630,8 @@ playlistDownloadBtn.addEventListener('click', async () => {
   });
 
   function updateStatusLine() {
-    const suffix = concurrency > 1 ? ` (${concurrency} a la vez)` : '';
-    statusPlaylistEl.textContent = `Descargando… ${completed} de ${total} completados${suffix}`;
+    const suffix = concurrency > 1 ? window.i18n.t('at_a_time_suffix', { n: concurrency }) : '';
+    statusPlaylistEl.textContent = window.i18n.t('downloading_progress', { completed, total, suffix });
     statusPlaylistEl.className = 'status';
   }
   updateStatusLine();
@@ -1391,7 +1648,7 @@ playlistDownloadBtn.addEventListener('click', async () => {
       // Si el usuario canceló este video mientras esperaba su turno en la cola, se salta.
       if (canceledBeforeStart.has(downloadId)) {
         canceledBeforeStart.delete(downloadId);
-        setPlaylistItemStatus(i, 'cancelado', 'error');
+        setPlaylistItemStatus(i, window.i18n.t('playlist_item_cancelled'), 'error');
         completed++;
         updateStatusLine();
         continue;
@@ -1401,11 +1658,11 @@ playlistDownloadBtn.addEventListener('click', async () => {
       // arrancarlo: queda "pausado" (ya reflejado en la UI) hasta que se reanude a mano.
       if (pausedBeforeStart.has(downloadId)) {
         pausedBeforeStart.delete(downloadId);
-        setPlaylistItemStatus(i, 'pausado', 'paused');
+        setPlaylistItemStatus(i, window.i18n.t('playlist_item_paused'), 'paused');
         continue;
       }
 
-      setPlaylistItemStatus(i, 'descargando…', 'downloading');
+      setPlaylistItemStatus(i, window.i18n.t('playlist_item_downloading'), 'downloading');
       setActiveDownloadStatus(downloadId, 'downloading');
       try {
         const result = await window.yoinksAPI.download({
@@ -1425,14 +1682,14 @@ playlistDownloadBtn.addEventListener('click', async () => {
         if (result && result.paused) {
           // Se quedó pausado a mitad de la descarga: no cuenta como completado todavía,
           // el usuario lo reanuda desde el panel de Actividad.
-          setPlaylistItemStatus(i, 'pausado', 'paused');
+          setPlaylistItemStatus(i, window.i18n.t('playlist_item_paused'), 'paused');
           setActiveDownloadStatus(downloadId, 'paused');
         } else if (result && result.canceled) {
-          setPlaylistItemStatus(i, 'cancelado', 'error');
+          setPlaylistItemStatus(i, window.i18n.t('playlist_item_cancelled'), 'error');
           removeActiveDownload(downloadId);
           completed++;
         } else {
-          setPlaylistItemStatus(i, 'listo', 'done');
+          setPlaylistItemStatus(i, window.i18n.t('playlist_item_done'), 'done');
           finishActiveDownload(downloadId, 'done');
           ok++;
           completed++;
@@ -1451,7 +1708,9 @@ playlistDownloadBtn.addEventListener('click', async () => {
   await Promise.all(workers);
 
   statusPlaylistEl.textContent =
-    failed === 0 ? `Listo. ${ok} video${ok === 1 ? '' : 's'} descargado${ok === 1 ? '' : 's'}.` : `Terminado con errores: ${ok} ok, ${failed} fallaron.`;
+    failed === 0
+      ? window.i18n.t('playlist_finished_ok', { ok, s: ok === 1 ? '' : 's' })
+      : window.i18n.t('playlist_finished_errors', { ok, failed });
   statusPlaylistEl.className = failed === 0 ? 'status success' : 'status error';
   playlistDownloadBtn.disabled = false;
 });
@@ -1494,7 +1753,7 @@ input.addEventListener('keydown', (e) => {
 
 async function startDownload(opt) {
   const label = opt.isPreset ? opt.res : `${opt.res}`;
-  setStatus(`Descargando "${label}"… 0%`, '', 'picker');
+  setStatus(window.i18n.t('downloading_label_pct', { label, pct: 0 }), '', 'picker');
 
   const payload = {
     url: currentUrl,
@@ -1524,33 +1783,41 @@ async function startDownload(opt) {
     payload.thumbnail
   );
   setActiveDownloadStatus(downloadId, 'downloading');
+  // Esta descarga pasa a ser la dueña del mensaje de estado del picker.
+  currentPickerStatusOwner = downloadId;
 
   progressCallbacks.set(downloadId, (percent) => {
-    setStatus(`Descargando "${label}"… ${percent.toFixed(0)}%`, '', 'picker');
+    if (currentPickerStatusOwner !== downloadId) return; // ya no es la descarga visible
+    setStatus(window.i18n.t('downloading_label_pct', { label, pct: percent.toFixed(0) }), '', 'picker');
   });
 
   try {
     const result = await window.yoinksAPI.download({ ...payload, downloadId });
+    const isVisible = currentPickerStatusOwner === downloadId;
     if (result && result.paused) {
       setActiveDownloadStatus(downloadId, 'paused');
-      setStatus(`Pausado.`, '', 'picker');
+      if (isVisible) setStatus(window.i18n.t('paused'), '', 'picker');
     } else if (result && result.canceled) {
       removeActiveDownload(downloadId);
-      setStatus('Descarga cancelada.', '', 'picker');
+      if (isVisible) setStatus(window.i18n.t('download_cancelled'), '', 'picker');
     } else {
-      setStatus(`Listo. Guardado en ${result.path}`, 'success', 'picker', {
-        onClick: () => window.yoinksAPI.showInFolder(result.path),
-      });
+      if (isVisible) {
+        setStatus(window.i18n.t('download_done_saved', { path: result.path }), 'success', 'picker', {
+          onClick: () => window.yoinksAPI.showInFolder(result.path),
+        });
+      }
       finishActiveDownload(downloadId, 'done');
     }
   } catch (err) {
-    setStatus('La descarga falló: ' + err.message, 'error', 'picker');
+    if (currentPickerStatusOwner === downloadId) {
+      setStatus(window.i18n.t('download_failed', { error: err.message }), 'error', 'picker');
+    }
     finishActiveDownload(downloadId, 'error');
   } finally {
     progressCallbacks.delete(downloadId);
     // Resetear preset seleccionado después de descargar
     selectedPresetForDownload = null;
-    presetMenuBtn.textContent = '⚙ Preajuste';
+    presetMenuBtn.textContent = window.i18n.t('btn_preset_menu');
     document.querySelectorAll('.preset-dropdown-item').forEach(item => item.classList.remove('active'));
     // Si hay alguna pestaña basada en historial abierta (Historial, Completadas,
     // Error o Canceladas), refrescarla para que se vea la nueva entrada.
@@ -1577,16 +1844,34 @@ document.addEventListener('click', (e) => {
   }
 });
 
+// Opción General: abre el panel General
+menuGeneral.addEventListener('click', () => {
+  closeSettingsMenu();
+  openGeneralPanel();
+});
+
 // Opción Download: abre el panel de Configuración de Descarga
 menuDownload.addEventListener('click', () => {
   closeSettingsMenu();
   openDownloadSettingsPanel();
 });
 
+// Opción Cookies
+menuCookies.addEventListener('click', () => {
+  closeSettingsMenu();
+  openCookiesPanel();
+});
+
 // Opción Presets
 menuPresets.addEventListener('click', () => {
   closeSettingsMenu();
   openPresetsPanel();
+});
+
+// Opción Terminal
+menuTerminal.addEventListener('click', () => {
+  closeSettingsMenu();
+  openTerminalPanel();
 });
 
 // Opción Actualizaciones
@@ -1627,23 +1912,23 @@ function extractShortVersion(raw) {
 // el panel, así que si el usuario actualizó ffmpeg o Deno, la próxima vez
 // que abra "Acerca de" verá el número de versión nuevo automáticamente.
 async function loadAboutLibraryVersions() {
-  aboutFfmpegVersionEl.textContent = 'Consultando versión…';
-  aboutDenoVersionEl.textContent = 'Consultando versión…';
+  aboutFfmpegVersionEl.textContent = window.i18n.t('checking_version');
+  aboutDenoVersionEl.textContent = window.i18n.t('checking_version');
   try {
     const info = await window.yoinksAPI.getUpdateVersions();
 
     const ffmpegShort = extractShortVersion(info.ffmpegVersion);
     aboutFfmpegVersionEl.textContent = ffmpegShort
       ? `v${ffmpegShort}`
-      : info.ffmpegVersion || 'descargado automáticamente';
+      : info.ffmpegVersion || window.i18n.t('auto_downloaded');
 
     const denoShort = extractShortVersion(info.denoVersion);
     aboutDenoVersionEl.textContent = denoShort
       ? `v${denoShort}`
-      : info.denoVersion || 'descargado automáticamente';
+      : info.denoVersion || window.i18n.t('auto_downloaded');
   } catch {
-    aboutFfmpegVersionEl.textContent = 'descargado automáticamente';
-    aboutDenoVersionEl.textContent = 'descargado automáticamente';
+    aboutFfmpegVersionEl.textContent = window.i18n.t('auto_downloaded');
+    aboutDenoVersionEl.textContent = window.i18n.t('auto_downloaded');
   }
 }
 
@@ -1695,19 +1980,23 @@ function renderPresetsTable() {
 
   if (presets.length === 0) {
     presetsTbody.innerHTML =
-      '<tr><td colspan="4" style="color:var(--fg-dimmer); padding:14px;">Sin presets todavía.</td></tr>';
+      `<tr><td colspan="4" style="color:var(--fg-dimmer); padding:14px;">${window.i18n.t('no_presets_yet')}</td></tr>`;
     return;
   }
 
   presets.forEach((p, i) => {
     const tr = document.createElement('tr');
+    // Las dos entradas "builtin" muestran su nombre traducido según el
+    // idioma activo (igual que las filas ★ del listado de descarga) en vez
+    // del texto fijo guardado en disco.
+    const displayName = p.builtin ? window.i18n.t(p.builtin) : p.name;
     tr.innerHTML = `
       <td class="site">${escapeHtml(p.site)}</td>
-      <td class="name">${escapeHtml(p.name)}</td>
+      <td class="name">${escapeHtml(displayName)}</td>
       <td class="options">${escapeHtml(p.options)}</td>
       <td class="actions">
-        <button class="preset-edit" data-index="${i}">editar</button>
-        <button class="preset-delete" data-index="${i}">eliminar</button>
+        <button class="preset-edit" data-index="${i}">${window.i18n.t('btn_edit')}</button>
+        <button class="preset-delete" data-index="${i}">${window.i18n.t('btn_delete')}</button>
       </td>
     `;
     presetsTbody.appendChild(tr);
@@ -1740,9 +2029,13 @@ function startPresetEdit(index) {
   if (!preset) return;
   editingPresetIndex = index;
   presetSiteInput.value = preset.site || '';
-  presetNameInput.value = preset.name || '';
+  // Si es una de las dos entradas "builtin", precargamos el nombre traducido
+  // (el que ve el usuario en la tabla) en vez del texto fijo guardado; al
+  // guardar los cambios se pierde el marcador "builtin" y pasa a ser un
+  // preajuste normal con ese nombre fijo, como cualquier otro.
+  presetNameInput.value = preset.builtin ? window.i18n.t(preset.builtin) : (preset.name || '');
   presetOptionsInput.value = preset.options || '';
-  presetsAddBtn.textContent = 'Guardar cambios';
+  presetsAddBtn.textContent = window.i18n.t('btn_save_changes');
   presetsAddBtn.classList.add('editing');
   presetsCancelEditBtn.classList.remove('hidden');
   presetSiteInput.focus();
@@ -1753,7 +2046,7 @@ function cancelPresetEdit() {
   presetSiteInput.value = '';
   presetNameInput.value = '';
   presetOptionsInput.value = '';
-  presetsAddBtn.textContent = 'Añadir';
+  presetsAddBtn.textContent = window.i18n.t('btn_add');
   presetsAddBtn.classList.remove('editing');
   presetsCancelEditBtn.classList.add('hidden');
 }
@@ -1768,6 +2061,236 @@ function closePresetsPanel() {
   cancelPresetEdit();
 }
 
+// ---- Panel de Terminal ----
+// Corre en un solo proceso a la vez. terminalRunning refleja si hay un
+// comando en curso, para deshabilitar "Ejecutar" y mostrar "Detener" en su
+// lugar (mismo patrón que pausar/cancelar una descarga normal).
+let terminalRunning = false;
+
+function terminalAppendLine(text, cssClass) {
+  if (!text) return;
+  const atBottom =
+    terminalOutputEl.scrollTop + terminalOutputEl.clientHeight >= terminalOutputEl.scrollHeight - 4;
+  const span = document.createElement('span');
+  if (cssClass) span.className = cssClass;
+  span.textContent = text;
+  terminalOutputEl.appendChild(span);
+  // Solo auto-scrolleamos si el usuario ya estaba abajo del todo; si se
+  // desplazó hacia arriba a propósito para leer algo, no se lo interrumpe.
+  if (atBottom) terminalOutputEl.scrollTop = terminalOutputEl.scrollHeight;
+}
+
+function setTerminalRunning(running) {
+  terminalRunning = running;
+  terminalRunBtn.disabled = running;
+  terminalRunBtn.classList.toggle('hidden', running);
+  terminalStopBtn.classList.toggle('hidden', !running);
+  terminalCommandInput.disabled = running;
+}
+
+function openTerminalPanel() {
+  closeAllOverlayPanels();
+  terminalOverlay.classList.remove('hidden');
+  terminalCommandInput.focus();
+}
+
+function closeTerminalPanel() {
+  terminalOverlay.classList.add('hidden');
+}
+
+async function runTerminalCommand() {
+  const command = terminalCommandInput.value.trim();
+  if (!command) {
+    terminalAppendLine(window.i18n.t('terminal_empty_command') + '\n', 'terminal-line-system');
+    return;
+  }
+  terminalAppendLine(`$ yt-dlp ${command}\n`, 'terminal-line-system');
+  setTerminalRunning(true);
+  try {
+    const result = await window.yoinksAPI.runTerminalCommand(command);
+    if (!result || !result.started) {
+      setTerminalRunning(false);
+    }
+  } catch (e) {
+    terminalAppendLine(`\n[error] ${e.message}\n`, 'terminal-line-stderr');
+    setTerminalRunning(false);
+  }
+}
+
+// Botones de "comandos rápidos": rellenan el input con una plantilla común.
+// Si el usuario ya había escrito una URL, se conserva y se agrega al final
+// de la plantilla en vez de perderla.
+terminalQuickCommandsEl.addEventListener('click', (e) => {
+  const chip = e.target.closest('.terminal-chip');
+  if (!chip || terminalRunning) return;
+  const template = chip.dataset.command || '';
+  const current = terminalCommandInput.value;
+  const urlMatch = current.match(/https?:\/\/\S+/);
+  terminalCommandInput.value = urlMatch ? `${template} ${urlMatch[0]}` : `${template} `;
+  terminalCommandInput.focus();
+  terminalCommandInput.selectionStart = terminalCommandInput.selectionEnd = terminalCommandInput.value.length;
+});
+
+// ---- Panel de Referencia de comandos ----
+// Lista completa (window.YTDLP_COMMANDS, ver terminal-commands-data.js)
+// filtrable por texto; cada fila permite copiar el comando al portapapeles
+// o insertarlo directamente en un input de destino. El panel es compartido
+// entre la Terminal y el campo "Opciones" del panel de Preajustes; se abre
+// desde cualquiera de los dos (terminalReferenceBtn / presetsReferenceBtn)
+// y terminalReferenceTargetInput guarda a cuál de los dos inputs insertar.
+let terminalReferenceTargetInput = null;
+function renderTerminalReferenceList(filterText) {
+  const lang = (window.i18n && window.i18n.getLanguage) ? window.i18n.getLanguage() : 'es';
+  const commands = (lang === 'en' ? window.YTDLP_COMMANDS_EN : window.YTDLP_COMMANDS_ES) || window.YTDLP_COMMANDS || [];
+  const query = (filterText || '').trim().toLowerCase();
+  terminalReferenceListEl.innerHTML = '';
+
+  let totalMatches = 0;
+
+  commands.forEach((group) => {
+    const items = query
+      ? group.items.filter(
+          (item) =>
+            item.cmd.toLowerCase().includes(query) || item.desc.toLowerCase().includes(query)
+        )
+      : group.items;
+
+    if (!items.length) return;
+    totalMatches += items.length;
+
+    const categoryEl = document.createElement('div');
+    categoryEl.className = 'terminal-reference-category';
+    categoryEl.textContent = group.category;
+    terminalReferenceListEl.appendChild(categoryEl);
+
+    items.forEach((item) => {
+      const row = document.createElement('div');
+      row.className = 'terminal-reference-row';
+      row.title = window.i18n.t('terminal_reference_copy_hint');
+
+      const main = document.createElement('div');
+      main.className = 'terminal-reference-row-main';
+
+      const cmdEl = document.createElement('code');
+      cmdEl.className = 'terminal-reference-cmd';
+      cmdEl.textContent = item.cmd;
+
+      const descEl = document.createElement('span');
+      descEl.className = 'terminal-reference-desc';
+      descEl.textContent = item.desc;
+
+      main.appendChild(cmdEl);
+      main.appendChild(descEl);
+
+      const useBtn = document.createElement('button');
+      useBtn.type = 'button';
+      useBtn.className = 'terminal-reference-use-btn';
+      useBtn.textContent = window.i18n.t('terminal_reference_use_btn');
+
+      // Clic en la fila (fuera del botón "Usar"): copia el comando.
+      main.addEventListener('click', async () => {
+        try {
+          await navigator.clipboard.writeText(item.cmd);
+          const original = cmdEl.textContent;
+          cmdEl.classList.add('terminal-reference-copied');
+          cmdEl.textContent = `${window.i18n.t('terminal_reference_copied')} ${original}`;
+          setTimeout(() => {
+            cmdEl.classList.remove('terminal-reference-copied');
+            cmdEl.textContent = original;
+          }, 1000);
+        } catch (e) {
+          // Si el portapapeles no está disponible, no hacemos nada más:
+          // el texto igual es seleccionable manualmente.
+        }
+      });
+
+      // Botón "Usar": inserta el comando en el input de destino (Terminal o
+      // el campo "Opciones" de Preajustes, según desde dónde se abrió el
+      // panel). En la Terminal conserva la URL si ya había una escrita;
+      // en Preajustes no aplica (ahí solo van opciones, sin URL) así que
+      // simplemente se agrega el comando al final del valor actual.
+      useBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const targetInput = terminalReferenceTargetInput || terminalCommandInput;
+        if (targetInput === terminalCommandInput) {
+          const current = targetInput.value;
+          const urlMatch = current.match(/https?:\/\/\S+/);
+          targetInput.value = urlMatch ? `${item.cmd} ${urlMatch[0]}` : `${item.cmd} `;
+        } else {
+          const current = targetInput.value.trim();
+          targetInput.value = current ? `${current} ${item.cmd}` : item.cmd;
+        }
+        closeTerminalReferencePanel();
+        targetInput.focus();
+        targetInput.selectionStart = targetInput.selectionEnd = targetInput.value.length;
+      });
+
+      row.appendChild(main);
+      row.appendChild(useBtn);
+      terminalReferenceListEl.appendChild(row);
+    });
+  });
+
+  if (!totalMatches) {
+    const empty = document.createElement('div');
+    empty.className = 'terminal-reference-empty';
+    empty.textContent = window.i18n.t('terminal_reference_empty');
+    terminalReferenceListEl.appendChild(empty);
+  }
+}
+
+function openTerminalReferencePanel(targetInput) {
+  terminalReferenceTargetInput = targetInput || terminalCommandInput;
+  terminalReferenceOverlay.classList.remove('hidden');
+  terminalReferenceSearchEl.value = '';
+  renderTerminalReferenceList('');
+  terminalReferenceSearchEl.focus();
+}
+
+function closeTerminalReferencePanel() {
+  terminalReferenceOverlay.classList.add('hidden');
+}
+
+terminalReferenceBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  openTerminalReferencePanel(terminalCommandInput);
+});
+presetsReferenceBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  openTerminalReferencePanel(presetOptionsInput);
+});
+terminalReferenceCloseBtn.addEventListener('click', closeTerminalReferencePanel);
+terminalReferenceOverlay.addEventListener('click', (e) => {
+  if (e.target === terminalReferenceOverlay) closeTerminalReferencePanel();
+});
+terminalReferenceSearchEl.addEventListener('input', () => {
+  renderTerminalReferenceList(terminalReferenceSearchEl.value);
+});
+
+terminalRunBtn.addEventListener('click', runTerminalCommand);
+terminalCommandInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !terminalRunning) runTerminalCommand();
+});
+terminalStopBtn.addEventListener('click', () => {
+  window.yoinksAPI.stopTerminalCommand();
+});
+terminalCloseBtn.addEventListener('click', closeTerminalPanel);
+terminalOverlay.addEventListener('click', (e) => {
+  if (e.target === terminalOverlay) closeTerminalPanel();
+});
+
+window.yoinksAPI.onTerminalOutput(({ stream, text }) => {
+  terminalAppendLine(text, stream === 'stderr' ? 'terminal-line-stderr' : null);
+});
+
+window.yoinksAPI.onTerminalDone(({ code }) => {
+  setTerminalRunning(false);
+  const msg = code === 0
+    ? window.i18n.t('terminal_finished_ok')
+    : window.i18n.t('terminal_finished_error', { code });
+  terminalAppendLine(`\n${msg}\n\n`, 'terminal-line-system');
+});
+
 // El evento para abrir el panel ahora se maneja a través del menú dropdown
 // btnPresets.addEventListener('click', openPresetsPanel); <- REMOVIDO
 presetsCloseBtn.addEventListener('click', closePresetsPanel);
@@ -1781,6 +2304,10 @@ document.addEventListener('keydown', (e) => {
     closeActivityPanel();
   } else if (!presetsOverlay.classList.contains('hidden')) {
     closePresetsPanel();
+  } else if (!terminalReferenceOverlay.classList.contains('hidden')) {
+    closeTerminalReferencePanel();
+  } else if (!terminalOverlay.classList.contains('hidden')) {
+    closeTerminalPanel();
   } else if (screenPicker.classList.contains('active')) {
     goToHomeScreen();
   }
@@ -1846,7 +2373,11 @@ function formatHistoryDate(isoString) {
 // reutiliza los mismos tonos ámbar que usa el badge "paused" del panel de
 // descargas en curso, para mantener el mismo lenguaje visual.
 const HISTORY_BADGE_CLASS = { success: 'success', error: 'error', cancelled: 'paused' };
-const HISTORY_BADGE_TEXT = { success: 'ok', error: 'error', cancelled: 'cancelado' };
+function getHistoryBadgeText(status) {
+  if (status === 'success') return 'ok';
+  if (status === 'cancelled') return window.i18n.t('badge_cancelled');
+  return 'error';
+}
 
 // Mapa de cada pestaña de historial a su lista/estado vacío en el DOM y, si
 // corresponde, el status por el que filtrar. "history" no filtra (muestra todo).
@@ -1895,11 +2426,11 @@ function renderHistoryList(listEl, emptyEl, history) {
     row.className = 'history-item';
 
     const badgeClass = HISTORY_BADGE_CLASS[entry.status] || 'error';
-    const badgeText = HISTORY_BADGE_TEXT[entry.status] || 'error';
+    const badgeText = getHistoryBadgeText(entry.status);
 
     const metaParts = [];
     if (entry.site) metaParts.push(escapeHtml(entry.site));
-    if (entry.label) metaParts.push(escapeHtml(entry.label));
+    if (entry.label) metaParts.push(escapeHtml(window.i18n.translateKnownText(entry.label)));
     metaParts.push(formatHistoryDate(entry.date));
 
     row.innerHTML = `
@@ -1914,9 +2445,9 @@ function renderHistoryList(listEl, emptyEl, history) {
         ${entry.status === 'error' ? `<div class="history-item-error">${escapeHtml(entry.error || '')}</div>` : ''}
       </div>
       <div class="history-item-actions">
-        ${entry.url ? '<button class="history-redownload">volver a descargar</button>' : ''}
-        ${entry.status === 'success' ? '<button class="history-open">abrir</button>' : ''}
-        <button class="history-delete">eliminar</button>
+        ${entry.url ? `<button class="history-redownload">${window.i18n.t('btn_redownload')}</button>` : ''}
+        ${entry.status === 'success' ? `<button class="history-open">${window.i18n.t('btn_open')}</button>` : ''}
+        <button class="history-delete">${window.i18n.t('btn_delete')}</button>
       </div>
     `;
 
@@ -1976,9 +2507,11 @@ function queueActiveDownload(title, label, payload, thumbnail) {
   const id = ++downloadIdCounter;
   activeDownloads.push({
     id,
-    title: title || 'Sin título',
+    title: title || window.i18n.t('no_title'),
     label: label || '',
     percent: 0,
+    speed: null,
+    eta: null,
     status: 'queued',
     payload: payload || null,
     thumbnail: thumbnail || (payload && payload.thumbnail) || null,
@@ -2001,11 +2534,13 @@ function setActiveDownloadStatus(id, status) {
 // "pausar"/"cancelar" podía caer justo cuando el botón se destruye y se
 // vuelve a crear, y el navegador nunca llegaba a disparar el evento
 // (parecía que el botón "no respondía").
-function setActiveDownloadProgress(id, percent) {
+function setActiveDownloadProgress(id, percent, speed, eta) {
   const d = activeDownloads.find((x) => x.id === id);
   if (!d) return;
   const wasQueued = d.status === 'queued';
   d.percent = percent;
+  d.speed = speed || null;
+  d.eta = eta || null;
   d.status = 'downloading';
 
   const row = downloadsListEl.querySelector(`[data-download-id="${id}"]`);
@@ -2015,15 +2550,23 @@ function setActiveDownloadProgress(id, percent) {
     if (fill) fill.style.width = percent + '%';
     if (text) text.textContent = percent.toFixed(0) + '%';
 
+    const speedText = row.querySelector('.active-dl-speed-text');
+    if (speedText) {
+      speedText.textContent = formatDownloadSpeedEta(speed, eta);
+      speedText.classList.toggle('hidden', !speed && !eta);
+    }
+
+    updateDownloadsSpeedSummary();
+
     // Si venía de "en cola", el texto/badge de estado deben pasar a
     // "descargando" sin tocar el resto de la fila (los botones se quedan
     // igual: ya mostraba "pausar"/"cancelar" desde que estaba en cola).
     if (wasQueued) {
       const statusText = row.querySelector('.active-dl-status-text');
-      if (statusText) statusText.textContent = DOWNLOAD_STATUS_LABEL.downloading;
+      if (statusText) statusText.textContent = window.i18n.t('status_downloading');
       const badge = row.querySelector('.history-badge');
       if (badge) {
-        badge.textContent = DOWNLOAD_STATUS_LABEL.downloading;
+        badge.textContent = window.i18n.t('status_downloading');
         badge.className = 'history-badge ' + DOWNLOAD_STATUS_BADGE_CLASS.downloading;
       }
     }
@@ -2033,6 +2576,72 @@ function setActiveDownloadProgress(id, percent) {
   // Si la fila todavía no existe en el DOM (caso raro), se recurre al
   // render completo como respaldo.
   renderDownloadsPanel();
+}
+
+// Arma el texto "1.23 MiB/s · ETA 00:07" a partir de lo que reportó yt-dlp.
+// Ambos campos son opcionales (yt-dlp no siempre los tiene disponibles,
+// sobre todo al principio de la descarga); se omite lo que falte.
+function formatDownloadSpeedEta(speed, eta) {
+  const parts = [];
+  if (speed) parts.push(speed);
+  if (eta) parts.push(`ETA ${eta}`);
+  return parts.join(' · ');
+}
+
+// Convierte un string de velocidad de yt-dlp (ej. "1.23MiB/s", "512.00KiB/s")
+// a bytes/segundo, para poder sumar la velocidad de varias descargas
+// simultáneas. Soporta tanto unidades binarias (KiB/MiB/GiB) como
+// decimales (KB/MB/GB), por si el binario reporta alguna variante.
+function parseSpeedToBytesPerSec(speedStr) {
+  if (!speedStr) return 0;
+  const m = speedStr.match(/^([\d.]+)\s*([KMGT]?i?)B\/s$/i);
+  if (!m) return 0;
+  const value = parseFloat(m[1]);
+  const prefix = m[2].toUpperCase();
+  const multipliers = { '': 1, K: 1000, KI: 1024, M: 1e6, MI: 1024 ** 2, G: 1e9, GI: 1024 ** 3, T: 1e12, TI: 1024 ** 4 };
+  return value * (multipliers[prefix] !== undefined ? multipliers[prefix] : 1);
+}
+
+// Inversa de la anterior: bytes/segundo a un string legible en unidades
+// binarias, para mostrar el total combinado.
+function formatBytesPerSec(bytes) {
+  if (!bytes || bytes <= 0) return null;
+  const units = ['B/s', 'KiB/s', 'MiB/s', 'GiB/s', 'TiB/s'];
+  let value = bytes;
+  let i = 0;
+  while (value >= 1024 && i < units.length - 1) {
+    value /= 1024;
+    i++;
+  }
+  return `${value.toFixed(2)}${units[i]}`;
+}
+
+// Barra resumen que se muestra arriba de la lista de "Descargas en curso"
+// cuando hay una o más descargas activas: junta la velocidad de todas
+// (parseando lo que reportó cada una) y muestra el total combinado, para
+// no tener que sumar a ojo cada fila individual.
+function updateDownloadsSpeedSummary() {
+  if (!downloadsSpeedSummaryEl) return;
+  const downloading = activeDownloads.filter((d) => d.status === 'downloading');
+
+  if (!downloading.length) {
+    downloadsSpeedSummaryEl.classList.add('hidden');
+    return;
+  }
+
+  const totalBytes = downloading.reduce((sum, d) => sum + parseSpeedToBytesPerSec(d.speed), 0);
+  const totalSpeedText = formatBytesPerSec(totalBytes);
+
+  const countLabel =
+    downloading.length === 1
+      ? window.i18n.t('downloads_speed_summary_one')
+      : window.i18n.t('downloads_speed_summary_many', { n: downloading.length });
+
+  downloadsSpeedSummaryTextEl.innerHTML = totalSpeedText
+    ? `${countLabel} · <strong>${escapeHtml(totalSpeedText)}</strong> ${window.i18n.t('downloads_speed_summary_total_suffix')}`
+    : countLabel;
+
+  downloadsSpeedSummaryEl.classList.remove('hidden');
 }
 
 function removeActiveDownload(id) {
@@ -2058,13 +2667,51 @@ function finishActiveDownload(id, status) {
 // Se reproduce al terminar una descarga (con éxito) y al terminar la
 // instalación automática de dependencias la primera vez. Respeta el
 // interruptor "Sonido" de Configuración.
+// Mismo sonido "campanita" (dos notas ascendentes, sin archivos externos)
+// que usa el conversor de PDF Creator: se genera con la Web Audio API en
+// vez del pitido genérico del sistema (shell.beep) que se usaba antes.
+let notificationAudioContext = null;
+function playSuccessChime() {
+  if (!notificationAudioContext) {
+    notificationAudioContext = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  const now = notificationAudioContext.currentTime;
+  const notes = [{ freq: 880, start: 0 }, { freq: 1318.51, start: 0.1 }];
+  notes.forEach(({ freq, start }) => {
+    const oscillator = notificationAudioContext.createOscillator();
+    const gain = notificationAudioContext.createGain();
+    oscillator.type = 'sine';
+    oscillator.frequency.value = freq;
+    gain.gain.setValueAtTime(0, now + start);
+    gain.gain.linearRampToValueAtTime(0.22, now + start + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + start + 0.35);
+    oscillator.connect(gain);
+    gain.connect(notificationAudioContext.destination);
+    oscillator.start(now + start);
+    oscillator.stop(now + start + 0.35);
+  });
+}
+
 async function playNotificationSoundIfEnabled() {
   try {
     const settings = await window.yoinksAPI.getSettings();
     if (!settings || settings.soundEnabled === false) return;
-    await window.yoinksAPI.playNotificationSound();
+    if (settings.soundStyle === 'windows') {
+      // Sonido del sistema de Windows (el pitido genérico que ya traía
+      // Electron/el sistema operativo antes de agregar la campanita).
+      await window.yoinksAPI.playNotificationSound();
+      return;
+    }
+    playSuccessChime();
   } catch (e) {
-    // sin sonido disponible: no es crítico, se ignora
+    // Si la Web Audio API falla por lo que sea (poco probable en un
+    // renderer de Electron), como último recurso caemos al pitido del
+    // sistema que se usaba antes, para no quedarnos sin sonido del todo.
+    try {
+      await window.yoinksAPI.playNotificationSound();
+    } catch (e2) {
+      // sin sonido disponible: no es crítico, se ignora
+    }
   }
 }
 
@@ -2075,12 +2722,21 @@ async function playNotificationSoundIfEnabled() {
 const progressCallbacks = new Map(); // downloadId -> function(percent)
 window.yoinksAPI.onProgress((data) => {
   if (!data || data.id === undefined) return;
-  setActiveDownloadProgress(data.id, data.percent);
+  setActiveDownloadProgress(data.id, data.percent, data.speed, data.eta);
   const cb = progressCallbacks.get(data.id);
   if (cb) cb(data.percent);
 });
 
-const DOWNLOAD_STATUS_LABEL = { queued: 'en cola', downloading: 'descargando', paused: 'pausado', done: 'listo', error: 'error' };
+function getDownloadStatusLabel(status) {
+  const map = {
+    queued: 'status_queued',
+    downloading: 'status_downloading',
+    paused: 'status_paused',
+    done: 'status_done',
+    error: 'status_error',
+  };
+  return map[status] ? window.i18n.t(map[status]) : status;
+}
 const DOWNLOAD_STATUS_BADGE_CLASS = { queued: 'queued', downloading: 'downloading', paused: 'paused', done: 'success', error: 'error' };
 
 function pauseActiveDownload(id) {
@@ -2217,6 +2873,8 @@ function renderDownloadsPanel() {
   downloadsListEl.innerHTML = '';
   downloadsEmptyEl.classList.toggle('hidden', activeDownloads.length > 0);
 
+  updateDownloadsSpeedSummary();
+
   // La barra de acciones masivas solo aparece si hay algo que seleccionar/pausar/cancelar.
   const selectableItems = activeDownloads.filter(isSelectableDownload);
   downloadsToolbarEl.classList.toggle('hidden', selectableItems.length === 0);
@@ -2243,18 +2901,18 @@ function renderDownloadsPanel() {
   
   if (selectedCount > 0) {
     // Modo "seleccionados"
-    downloadsPauseBtn.textContent = selectedCount === 1 ? 'pausar seleccionado' : 'pausar seleccionados';
-    downloadsResumeBtn.textContent = selectedCount === 1 ? 'reanudar seleccionado' : 'reanudar seleccionados';
-    downloadsCancelBtn.textContent = selectedCount === 1 ? 'cancelar seleccionado' : 'cancelar seleccionados';
+    downloadsPauseBtn.textContent = selectedCount === 1 ? window.i18n.t('pause_selected') : window.i18n.t('pause_selected_plural');
+    downloadsResumeBtn.textContent = selectedCount === 1 ? window.i18n.t('resume_selected') : window.i18n.t('resume_selected_plural');
+    downloadsCancelBtn.textContent = selectedCount === 1 ? window.i18n.t('cancel_selected') : window.i18n.t('cancel_selected_plural');
     
     downloadsPauseBtn.disabled = !selectedPauseable;
     downloadsResumeBtn.disabled = !selectedResumeable;
     downloadsCancelBtn.disabled = selectedDownloadIds.size === 0;
   } else {
     // Modo "todo"
-    downloadsPauseBtn.textContent = 'pausar todo';
-    downloadsResumeBtn.textContent = 'reanudar todo';
-    downloadsCancelBtn.textContent = 'cancelar todo';
+    downloadsPauseBtn.textContent = window.i18n.t('btn_pause_all');
+    downloadsResumeBtn.textContent = window.i18n.t('btn_resume_all');
+    downloadsCancelBtn.textContent = window.i18n.t('btn_cancel_all');
     
     downloadsPauseBtn.disabled = !hasPauseable;
     downloadsResumeBtn.disabled = !hasResumeable;
@@ -2268,7 +2926,7 @@ function renderDownloadsPanel() {
     const row = document.createElement('div');
     row.className = 'history-item';
 
-    const statusLabel = DOWNLOAD_STATUS_LABEL[d.status] || d.status;
+    const statusLabel = getDownloadStatusLabel(d.status);
     const badgeClass = DOWNLOAD_STATUS_BADGE_CLASS[d.status] || '';
     const showProgress = d.status === 'queued' || d.status === 'downloading';
     const selectable = isSelectableDownload(d);
@@ -2278,20 +2936,20 @@ function renderDownloadsPanel() {
     // pausado se puede reanudar (retoma el .part donde quedó).
     const actionButtons = [];
     if (d.status === 'downloading' || d.status === 'queued') {
-      actionButtons.push('<button class="active-dl-pause" title="Pausar">pausar</button>');
+      actionButtons.push(`<button class="active-dl-pause" title="${window.i18n.t('tt_pause')}">${window.i18n.t('btn_pause')}</button>`);
     }
-    if (d.status === 'paused') actionButtons.push('<button class="active-dl-resume" title="Reanudar">reanudar</button>');
+    if (d.status === 'paused') actionButtons.push(`<button class="active-dl-resume" title="${window.i18n.t('tt_resume')}">${window.i18n.t('btn_resume')}</button>`);
     if (d.status === 'queued' || d.status === 'downloading' || d.status === 'paused') {
-      actionButtons.push('<button class="active-dl-cancel" title="Cancelar">cancelar</button>');
+      actionButtons.push(`<button class="active-dl-cancel" title="${window.i18n.t('tt_cancel')}">${window.i18n.t('btn_cancel_download')}</button>`);
     }
 
     row.innerHTML = `
-      ${selectable ? `<input type="checkbox" class="active-dl-select" ${isChecked ? 'checked' : ''} title="Seleccionar" />` : '<span class="active-dl-select-spacer"></span>'}
+      ${selectable ? `<input type="checkbox" class="active-dl-select" ${isChecked ? 'checked' : ''} title="${window.i18n.t('tt_select')}" />` : '<span class="active-dl-select-spacer"></span>'}
       ${d.thumbnail ? `<img class="history-item-thumb" src="${escapeHtml(d.thumbnail)}" alt="" onerror="this.remove()" />` : ''}
       <div class="history-item-main">
         <div class="history-item-title">${escapeHtml(d.title)}</div>
         <div class="history-item-meta">
-          ${d.label ? `<span>${escapeHtml(d.label)}</span><span class="sep">·</span>` : ''}
+          ${d.label ? `<span>${escapeHtml(window.i18n.translateKnownText(d.label))}</span><span class="sep">·</span>` : ''}
           <span class="active-dl-status-text">${statusLabel}</span>
         </div>
         ${
@@ -2299,6 +2957,7 @@ function renderDownloadsPanel() {
             ? `<div class="update-progress">
                  <div class="update-progress-bar"><div class="update-progress-fill" style="width:${d.percent}%"></div></div>
                  <span class="update-progress-text">${d.percent.toFixed(0)}%</span>
+                 <span class="active-dl-speed-text ${d.speed || d.eta ? '' : 'hidden'}">${escapeHtml(formatDownloadSpeedEta(d.speed, d.eta))}</span>
                </div>`
             : ''
         }
@@ -2402,6 +3061,51 @@ function defaultCookiesDraft() {
 
 let cookiesDraft = defaultCookiesDraft();
 
+// Sitios que el propio usuario agregó (Configuración → Cookies → "Agregar sitio").
+// Se cargan/guardan junto con el resto de la configuración; cada uno tiene
+// { id, name, hostname, url }. Sus <option> se agregan dinámicamente al final
+// del selector.
+let customCookieSites = [];
+
+function rebuildCustomSiteOptions() {
+  settingCookiesSiteSelect.querySelectorAll('option[data-custom-site]').forEach((opt) => opt.remove());
+  for (const site of customCookieSites) {
+    const opt = document.createElement('option');
+    opt.value = site.id;
+    opt.textContent = site.name;
+    opt.dataset.customSite = '1';
+    settingCookiesSiteSelect.appendChild(opt);
+  }
+}
+
+function updateRemoveSiteButtonVisibility() {
+  const isCustom = customCookieSites.some((s) => s.id === settingCookiesSiteSelect.value);
+  settingCookiesRemoveSiteBtn.classList.toggle('hidden', !isCustom);
+}
+
+// Si el sitio elegido es uno personalizado, precarga su nombre/URL en el
+// formulario de "Agregar sitio" y cambia el botón a modo edición; si no,
+// deja el formulario vacío en modo "agregar nuevo".
+function updateAddSiteFormForSelection() {
+  const site = settingCookiesSiteSelect.value;
+  const custom = customCookieSites.find((s) => s.id === site);
+  settingAddSiteError.textContent = '';
+  settingAddSiteError.classList.add('hidden');
+  if (custom) {
+    settingNewSiteNameInput.value = custom.name;
+    settingNewSiteUrlInput.value = custom.url || custom.hostname || '';
+    settingAddSiteBtn.setAttribute('data-i18n', 'btn_save_site_changes');
+    settingAddSiteBtn.textContent = window.i18n.t('btn_save_site_changes');
+    settingAddSiteBtn.dataset.editingId = custom.id;
+  } else {
+    settingNewSiteNameInput.value = '';
+    settingNewSiteUrlInput.value = '';
+    settingAddSiteBtn.setAttribute('data-i18n', 'btn_add_site');
+    settingAddSiteBtn.textContent = window.i18n.t('btn_add_site');
+    delete settingAddSiteBtn.dataset.editingId;
+  }
+}
+
 // Guarda lo que esté en el formulario ahora mismo dentro del borrador del sitio
 // que estaba seleccionado, antes de cambiar a otro sitio o de guardar todo.
 function commitCookiesFormToDraft(site) {
@@ -2431,14 +3135,15 @@ function updateCookiesRowsVisibility() {
   if (mode === 'applogin') refreshLoginStatus();
 }
 
-// "Otros sitios" no tiene ventana de login propia, así que se oculta esa opción
-// del desplegable de modo cuando el sitio elegido para configurar es "other".
+// "Otros sitios" y los sitios agregados por el usuario no tienen ventana de
+// login propia, así que se oculta esa opción del desplegable de modo en esos casos.
 function updateApploginOptionAvailability() {
   const applyOption = settingCookiesModeSelect.querySelector('option[value="applogin"]');
   if (!applyOption) return;
-  const isOther = settingCookiesSiteSelect.value === 'other';
-  applyOption.disabled = isOther;
-  if (isOther && settingCookiesModeSelect.value === 'applogin') {
+  const site = settingCookiesSiteSelect.value;
+  const noAppLogin = site === 'other' || customCookieSites.some((s) => s.id === site);
+  applyOption.disabled = noAppLogin;
+  if (noAppLogin && settingCookiesModeSelect.value === 'applogin') {
     settingCookiesModeSelect.value = 'none';
   }
 }
@@ -2448,8 +3153,80 @@ settingCookiesSiteSelect.addEventListener('change', (e) => {
   // dataset.prevSite guarda cuál era el sitio mostrado hasta este cambio.
   commitCookiesFormToDraft(settingCookiesSiteSelect.dataset.prevSite);
   updateApploginOptionAvailability();
+  updateRemoveSiteButtonVisibility();
+  updateAddSiteFormForSelection();
   loadCookiesFormFromDraft(e.target.value);
   settingCookiesSiteSelect.dataset.prevSite = e.target.value;
+});
+
+// Agrega un sitio nuevo, o guarda los cambios de nombre/URL de uno ya
+// existente (según lo que haya cargado updateAddSiteFormForSelection).
+settingAddSiteBtn.addEventListener('click', async () => {
+  const name = settingNewSiteNameInput.value.trim();
+  const url = settingNewSiteUrlInput.value.trim();
+  settingAddSiteError.textContent = '';
+  settingAddSiteError.classList.add('hidden');
+  if (!name || !url) {
+    settingAddSiteError.textContent = window.i18n.t('err_new_site_required');
+    settingAddSiteError.classList.remove('hidden');
+    return;
+  }
+
+  const editingId = settingAddSiteBtn.dataset.editingId;
+  settingAddSiteBtn.disabled = true;
+  try {
+    // Antes de agregar/editar, guardamos el borrador del sitio visible para no perderlo.
+    commitCookiesFormToDraft(settingCookiesSiteSelect.value);
+
+    let site;
+    if (editingId) {
+      site = await window.yoinksAPI.updateCustomCookieSite({ id: editingId, name, url });
+      const idx = customCookieSites.findIndex((s) => s.id === editingId);
+      if (idx !== -1) customCookieSites[idx] = site;
+    } else {
+      site = await window.yoinksAPI.addCustomCookieSite({ name, url });
+      customCookieSites.push(site);
+      cookiesDraft[site.id] = { mode: 'none', browser: 'firefox', file: '' };
+    }
+
+    rebuildCustomSiteOptions();
+    settingCookiesSiteSelect.value = site.id;
+    settingCookiesSiteSelect.dataset.prevSite = site.id;
+    updateApploginOptionAvailability();
+    updateRemoveSiteButtonVisibility();
+    updateAddSiteFormForSelection();
+    loadCookiesFormFromDraft(site.id);
+  } catch (e) {
+    settingAddSiteError.textContent = e.message || window.i18n.t('err_new_site_required');
+    settingAddSiteError.classList.remove('hidden');
+  } finally {
+    settingAddSiteBtn.disabled = false;
+  }
+});
+
+// Quita el sitio personalizado actualmente elegido, junto con su configuración
+// de cookies guardada.
+settingCookiesRemoveSiteBtn.addEventListener('click', async () => {
+  const site = settingCookiesSiteSelect.value;
+  if (!customCookieSites.some((s) => s.id === site)) return;
+
+  settingCookiesRemoveSiteBtn.disabled = true;
+  try {
+    await window.yoinksAPI.removeCustomCookieSite(site);
+    customCookieSites = customCookieSites.filter((s) => s.id !== site);
+    delete cookiesDraft[site];
+    rebuildCustomSiteOptions();
+    settingCookiesSiteSelect.value = 'youtube';
+    settingCookiesSiteSelect.dataset.prevSite = 'youtube';
+    updateApploginOptionAvailability();
+    updateRemoveSiteButtonVisibility();
+    updateAddSiteFormForSelection();
+    loadCookiesFormFromDraft('youtube');
+  } catch (e) {
+    // no crítico: si falla, el sitio simplemente sigue en la lista
+  } finally {
+    settingCookiesRemoveSiteBtn.disabled = false;
+  }
 });
 
 settingCookiesModeSelect.addEventListener('change', updateCookiesRowsVisibility);
@@ -2466,10 +3243,11 @@ async function refreshLoginStatus() {
   const info = status[site];
   if (info) {
     const date = new Date(info.loggedInAt);
-    settingLoginStatusEl.textContent = `Sesión iniciada el ${date.toLocaleDateString('es')} (${info.cookieCount} cookies guardadas).`;
+    const localeDate = date.toLocaleDateString(window.i18n.getLanguage() === 'en' ? 'en' : 'es');
+    settingLoginStatusEl.textContent = window.i18n.t('session_started_on', { date: localeDate, count: info.cookieCount });
     settingLoginLogoutBtn.classList.remove('hidden');
   } else {
-    settingLoginStatusEl.textContent = 'No has iniciado sesión con esta cuenta.';
+    settingLoginStatusEl.textContent = window.i18n.t('login_status_default');
     settingLoginLogoutBtn.classList.add('hidden');
   }
 }
@@ -2478,22 +3256,23 @@ settingLoginBtn.addEventListener('click', async () => {
   const site = settingCookiesSiteSelect.value;
   const label = COOKIE_SITE_LABELS[site] || site;
   settingLoginBtn.disabled = true;
-  settingLoginBtn.textContent = 'Esperando…';
-  settingLoginStatusEl.textContent = `Se abrió una ventana de ${label}. Inicia sesión ahí y ciérrala cuando termines.`;
+  settingLoginBtn.textContent = window.i18n.t('waiting');
+  settingLoginStatusEl.textContent = window.i18n.t('login_window_opened', { site: label });
   try {
     const result = await window.yoinksAPI.startLogin(site);
     if (result && result.success) {
-      settingLoginStatusEl.textContent = `Listo, sesión guardada (${result.cookieCount} cookies).`;
+      settingLoginStatusEl.textContent = window.i18n.t('login_saved', { count: result.cookieCount });
       settingLoginLogoutBtn.classList.remove('hidden');
     } else {
-      settingLoginStatusEl.textContent =
-        'No se guardó ninguna sesión: ' + (result && result.error ? result.error : 'ciérrala solo después de iniciar sesión.');
+      settingLoginStatusEl.textContent = window.i18n.t('no_session_saved', {
+        reason: result && result.error ? result.error : window.i18n.t('close_only_after_login'),
+      });
     }
   } catch (e) {
-    settingLoginStatusEl.textContent = 'No se pudo abrir la ventana de inicio de sesión: ' + e.message;
+    settingLoginStatusEl.textContent = window.i18n.t('login_window_error', { error: e.message });
   } finally {
     settingLoginBtn.disabled = false;
-    settingLoginBtn.textContent = 'Iniciar sesión…';
+    settingLoginBtn.textContent = window.i18n.t('btn_login');
   }
 });
 
@@ -2524,21 +3303,9 @@ function applyDownloadSettingsToForm(settings) {
   settingDownloadPathInput.value = settings.downloadPath || '';
   settingOutputTemplateInput.value = settings.outputTemplate || '%(title).200B - %(uploader).30B.%(ext)s';
 
-  cookiesDraft = defaultCookiesDraft();
-  if (settings.cookiesPerSite) {
-    for (const key of COOKIE_SITE_KEYS) {
-      const entry = settings.cookiesPerSite[key];
-      if (entry) cookiesDraft[key] = { mode: entry.mode || 'none', browser: entry.browser || 'firefox', file: entry.file || '' };
-    }
-  }
-  const currentSite = settingCookiesSiteSelect.value || 'youtube';
-  settingCookiesSiteSelect.dataset.prevSite = currentSite;
-  updateApploginOptionAvailability();
-  loadCookiesFormFromDraft(currentSite);
-
   settingRateLimitInput.value = settings.rateLimit || '';
+  settingRateLimitModeSelect.value = settings.rateLimitMode === 'total' ? 'total' : 'perFile';
   settingConcurrentDownloadsSelect.value = String(settings.concurrentDownloads || 1);
-  settingSoundEnabledCheckbox.checked = settings.soundEnabled !== false;
 }
 
 function openDownloadSettingsPanel() {
@@ -2579,17 +3346,24 @@ settingCookiesFileBrowseBtn.addEventListener('click', async () => {
 });
 
 downloadSettingsSaveBtn.addEventListener('click', async () => {
-  // Volcamos al borrador lo que haya quedado en el formulario del sitio visible
-  // antes de armar el objeto final, para no perder la última edición.
-  commitCookiesFormToDraft(settingCookiesSiteSelect.value);
+  // Este panel ya no edita cookies ni General (sonido / cierre de ventana), así
+  // que traemos lo que haya guardado en disco para no pisarlo con lo del form.
+  let current;
+  try {
+    current = await window.yoinksAPI.getSettings();
+  } catch (e) {
+    current = {};
+  }
 
   const settings = {
     downloadPath: settingDownloadPathInput.value.trim(),
     outputTemplate: settingOutputTemplateInput.value.trim() || '%(title).200B - %(uploader).30B.%(ext)s',
-    cookiesPerSite: cookiesDraft,
+    cookiesPerSite: current.cookiesPerSite,
     rateLimit: settingRateLimitInput.value.trim(),
+    rateLimitMode: settingRateLimitModeSelect.value === 'total' ? 'total' : 'perFile',
     concurrentDownloads: parseInt(settingConcurrentDownloadsSelect.value, 10) || 1,
-    soundEnabled: settingSoundEnabledCheckbox.checked,
+    soundEnabled: current.soundEnabled,
+    closeBehavior: current.closeBehavior,
   };
 
   try {
@@ -2607,6 +3381,161 @@ downloadSettingsResetBtn.addEventListener('click', async () => {
     applyDownloadSettingsToForm(defaults);
   } catch (e) {
     // no hacer nada si falla el restablecimiento
+  }
+});
+
+// ================= PANEL GENERAL (panel ⚙ → General) =================
+
+async function loadGeneralSettings() {
+  let settings;
+  try {
+    settings = await window.yoinksAPI.getSettings();
+  } catch (e) {
+    settings = null;
+  }
+  applyGeneralSettingsToForm(settings || {});
+}
+
+function applyGeneralSettingsToForm(settings) {
+  settingSoundEnabledCheckbox.checked = settings.soundEnabled !== false;
+  settingSoundStyleSelect.value = settings.soundStyle === 'windows' ? 'windows' : 'chime';
+  settingCloseBehaviorSelect.value = ['ask', 'minimize', 'close'].includes(settings.closeBehavior) ? settings.closeBehavior : 'ask';
+  settingLanguageSelect.value = settings.language === 'en' ? 'en' : 'es';
+}
+
+function openGeneralPanel() {
+  closeAllOverlayPanels();
+  loadGeneralSettings();
+  generalOverlay.classList.remove('hidden');
+}
+
+function closeGeneralPanel() {
+  generalOverlay.classList.add('hidden');
+}
+
+generalCloseBtn.addEventListener('click', closeGeneralPanel);
+generalOverlay.addEventListener('click', (e) => {
+  if (e.target === generalOverlay) closeGeneralPanel();
+});
+
+generalSaveBtn.addEventListener('click', async () => {
+  // Traemos el resto de la configuración actual para no pisarla: este panel
+  // solo debe tocar sonido y comportamiento al cerrar.
+  let current;
+  try {
+    current = await window.yoinksAPI.getSettings();
+  } catch (e) {
+    current = {};
+  }
+
+  try {
+    const saved = await window.yoinksAPI.saveSettings({
+      ...current,
+      soundEnabled: settingSoundEnabledCheckbox.checked,
+      soundStyle: settingSoundStyleSelect.value === 'windows' ? 'windows' : 'chime',
+      closeBehavior: settingCloseBehaviorSelect.value,
+      language: settingLanguageSelect.value,
+    });
+    applyGeneralSettingsToForm(saved);
+    applyLanguage(saved.language === 'en' ? 'en' : 'es');
+    if (window.yoinksAPI.setLanguage) window.yoinksAPI.setLanguage(saved.language === 'en' ? 'en' : 'es');
+    closeGeneralPanel();
+  } catch (e) {
+    // si falla el guardado, dejamos el panel abierto para que el usuario reintente
+  }
+});
+
+generalResetBtn.addEventListener('click', () => {
+  // Restablece solo el formulario en pantalla a los valores por defecto;
+  // hay que presionar "Guardar" para que quede persistido.
+  applyGeneralSettingsToForm({ soundEnabled: true, soundStyle: 'chime', closeBehavior: 'ask', language: 'es' });
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !generalOverlay.classList.contains('hidden')) {
+    closeGeneralPanel();
+  }
+});
+
+// ================= PANEL DE COOKIES (panel ⚙ → Cookies) =================
+
+async function loadCookiesSettings() {
+  let settings;
+  try {
+    settings = await window.yoinksAPI.getSettings();
+  } catch (e) {
+    settings = null;
+  }
+  customCookieSites = (settings && Array.isArray(settings.customCookieSites)) ? settings.customCookieSites : [];
+  rebuildCustomSiteOptions();
+  applyCookiesSettingsToForm((settings && settings.cookiesPerSite) || null);
+}
+
+function applyCookiesSettingsToForm(cookiesPerSite) {
+  cookiesDraft = defaultCookiesDraft();
+  const allKeys = [...COOKIE_SITE_KEYS, ...customCookieSites.map((s) => s.id)];
+  if (cookiesPerSite) {
+    for (const key of allKeys) {
+      const entry = cookiesPerSite[key];
+      if (entry) cookiesDraft[key] = { mode: entry.mode || 'none', browser: entry.browser || 'firefox', file: entry.file || '' };
+    }
+  }
+  const currentSite = allKeys.includes(settingCookiesSiteSelect.value) ? settingCookiesSiteSelect.value : 'youtube';
+  settingCookiesSiteSelect.value = currentSite;
+  settingCookiesSiteSelect.dataset.prevSite = currentSite;
+  updateApploginOptionAvailability();
+  updateRemoveSiteButtonVisibility();
+  updateAddSiteFormForSelection();
+  loadCookiesFormFromDraft(currentSite);
+}
+
+function openCookiesPanel() {
+  closeAllOverlayPanels();
+  loadCookiesSettings();
+  cookiesOverlay.classList.remove('hidden');
+}
+
+function closeCookiesPanel() {
+  cookiesOverlay.classList.add('hidden');
+}
+
+cookiesCloseBtn.addEventListener('click', closeCookiesPanel);
+cookiesOverlay.addEventListener('click', (e) => {
+  if (e.target === cookiesOverlay) closeCookiesPanel();
+});
+
+cookiesSaveBtn.addEventListener('click', async () => {
+  // Volcamos al borrador lo que haya quedado en el formulario del sitio visible
+  // antes de armar el objeto final, para no perder la última edición.
+  commitCookiesFormToDraft(settingCookiesSiteSelect.value);
+
+  // Traemos el resto de la configuración actual para no pisarla: este panel
+  // solo debe tocar cookiesPerSite.
+  let current;
+  try {
+    current = await window.yoinksAPI.getSettings();
+  } catch (e) {
+    current = {};
+  }
+
+  try {
+    const saved = await window.yoinksAPI.saveSettings({ ...current, cookiesPerSite: cookiesDraft });
+    applyCookiesSettingsToForm(saved.cookiesPerSite);
+    closeCookiesPanel();
+  } catch (e) {
+    // si falla el guardado, dejamos el panel abierto para que el usuario reintente
+  }
+});
+
+cookiesResetBtn.addEventListener('click', () => {
+  // Restablece solo el borrador en pantalla (a "Ninguna" en todos los sitios);
+  // hay que presionar "Guardar" para que quede persistido.
+  applyCookiesSettingsToForm(null);
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !cookiesOverlay.classList.contains('hidden')) {
+    closeCookiesPanel();
   }
 });
 
@@ -2679,20 +3608,21 @@ window.yoinksAPI.onUpdateProgress(({ target, percent }) => {
 });
 
 async function loadUpdateVersions() {
-  updateYtdlpVersionEl.textContent = 'Consultando versión…';
-  updateFfmpegVersionEl.textContent = 'Consultando versión…';
-  updateDenoVersionEl.textContent = 'Consultando versión…';
+  updateYtdlpVersionEl.textContent = window.i18n.t('checking_version');
+  updateFfmpegVersionEl.textContent = window.i18n.t('checking_version');
+  updateDenoVersionEl.textContent = window.i18n.t('checking_version');
   try {
     const info = await window.yoinksAPI.getUpdateVersions();
     updateYtdlpVersionEl.textContent = info.ytdlpVersion;
     updateFfmpegVersionEl.textContent = info.ffmpegVersion;
     updateDenoVersionEl.textContent = info.denoVersion;
-    updateDenoBtn.textContent = info.denoManaged ? 'Actualizar' : 'Instalar';
+    updateDenoBtn.textContent = info.denoManaged ? window.i18n.t('btn_update') : window.i18n.t('btn_install');
+    updateDenoBtn.dataset.managed = info.denoManaged ? '1' : '0';
     return info;
   } catch (e) {
-    updateYtdlpVersionEl.textContent = 'No instalado';
-    updateFfmpegVersionEl.textContent = 'No instalado';
-    updateDenoVersionEl.textContent = 'No instalado';
+    updateYtdlpVersionEl.textContent = window.i18n.t('not_installed');
+    updateFfmpegVersionEl.textContent = window.i18n.t('not_installed');
+    updateDenoVersionEl.textContent = window.i18n.t('not_installed');
     return null;
   }
 }
@@ -2776,7 +3706,7 @@ settingYtdlpChannelSelect.addEventListener('change', async () => {
     setUpdatesStatus('Canal cambiado a "' + (channel === 'nightly' ? 'Nightly' : 'Estable') + '". Revisando versión…');
     await checkForUpdatesSilently();
   } catch (e) {
-    setUpdatesStatus('No se pudo guardar el canal de yt-dlp.', 'error');
+    setUpdatesStatus(window.i18n.t('channel_save_failed'), 'error');
   }
 });
 
@@ -2784,27 +3714,27 @@ settingYtdlpChannelSelect.addEventListener('change', async () => {
 // como desde la instalación automática al abrir la app.
 async function runYtdlpUpdate() {
   updateYtdlpBtn.disabled = true;
-  updateYtdlpBtn.textContent = 'Actualizando…';
+  updateYtdlpBtn.textContent = window.i18n.t('updating_ellipsis');
   showUpdateProgress('ytdlp', 0);
-  setUpdatesStatus('Descargando la última versión de yt-dlp…');
+  setUpdatesStatus(window.i18n.t('downloading_ytdlp_latest'));
 
   try {
     const result = await window.yoinksAPI.updateYtDlp();
     if (result.success) {
       updateYtdlpVersionEl.textContent = result.version;
-      setUpdatesStatus('yt-dlp actualizado correctamente.', 'success');
+      setUpdatesStatus(window.i18n.t('ytdlp_updated_ok'), 'success');
       applyUpdateCheckResult({ ...lastUpdateCheck, ytdlpUpdateAvailable: false, ytdlpLatestVersion: null, ytdlpChecked: true });
     } else {
-      setUpdatesStatus('No se pudo actualizar yt-dlp: ' + result.error, 'error');
+      setUpdatesStatus(window.i18n.t('ytdlp_update_failed', { error: result.error }), 'error');
     }
     return result;
   } catch (err) {
-    setUpdatesStatus('No se pudo actualizar yt-dlp: ' + err.message, 'error');
+    setUpdatesStatus(window.i18n.t('ytdlp_update_failed', { error: err.message }), 'error');
     return { success: false, error: err.message };
   } finally {
     hideUpdateProgress('ytdlp');
     updateYtdlpBtn.disabled = false;
-    updateYtdlpBtn.textContent = 'Actualizar';
+    updateYtdlpBtn.textContent = window.i18n.t('btn_update');
   }
 }
 
@@ -2814,27 +3744,27 @@ updateYtdlpBtn.addEventListener('click', runYtdlpUpdate);
 // instalación automática.
 async function runFfmpegUpdate() {
   updateFfmpegBtn.disabled = true;
-  updateFfmpegBtn.textContent = 'Actualizando…';
+  updateFfmpegBtn.textContent = window.i18n.t('updating_ellipsis');
   showUpdateProgress('ffmpeg', 0);
-  setUpdatesStatus('Descargando la última versión de FFmpeg…');
+  setUpdatesStatus(window.i18n.t('downloading_ffmpeg_latest'));
 
   try {
     const result = await window.yoinksAPI.updateFfmpeg();
     if (result.success) {
       updateFfmpegVersionEl.textContent = result.version;
-      setUpdatesStatus('FFmpeg actualizado correctamente.', 'success');
+      setUpdatesStatus(window.i18n.t('ffmpeg_updated_ok'), 'success');
       applyUpdateCheckResult({ ...lastUpdateCheck, ffmpegUpdateAvailable: false, ffmpegChecked: true });
     } else {
-      setUpdatesStatus('No se pudo actualizar FFmpeg: ' + result.error, 'error');
+      setUpdatesStatus(window.i18n.t('ffmpeg_update_failed', { error: result.error }), 'error');
     }
     return result;
   } catch (err) {
-    setUpdatesStatus('No se pudo actualizar FFmpeg: ' + err.message, 'error');
+    setUpdatesStatus(window.i18n.t('ffmpeg_update_failed', { error: err.message }), 'error');
     return { success: false, error: err.message };
   } finally {
     hideUpdateProgress('ffmpeg');
     updateFfmpegBtn.disabled = false;
-    updateFfmpegBtn.textContent = 'Actualizar';
+    updateFfmpegBtn.textContent = window.i18n.t('btn_update');
   }
 }
 
@@ -2844,35 +3774,36 @@ updateFfmpegBtn.addEventListener('click', runFfmpegUpdate);
 // (primera vez) o "Actualizando…" (ya estaba instalado).
 async function runDenoUpdate(wasManaged) {
   updateDenoBtn.disabled = true;
-  updateDenoBtn.textContent = wasManaged ? 'Actualizando…' : 'Instalando…';
+  updateDenoBtn.textContent = wasManaged ? window.i18n.t('updating_ellipsis') : window.i18n.t('installing_ellipsis');
   showUpdateProgress('deno', 0);
-  setUpdatesStatus(wasManaged ? 'Descargando la última versión de Deno…' : 'Instalando Deno…');
+  setUpdatesStatus(wasManaged ? window.i18n.t('downloading_deno_latest') : window.i18n.t('installing_deno'));
 
   try {
     const result = await window.yoinksAPI.updateDeno();
     if (result.success) {
       updateDenoVersionEl.textContent = result.version;
       setUpdatesStatus(
-        wasManaged ? 'Deno actualizado correctamente.' : 'Deno instalado correctamente. Ya puedes descargar videos con restricción de edad.',
+        wasManaged ? window.i18n.t('deno_updated_ok') : window.i18n.t('deno_installed_ok'),
         'success'
       );
       applyUpdateCheckResult({ ...lastUpdateCheck, denoUpdateAvailable: false, denoLatestVersion: null, denoChecked: true });
     } else {
-      setUpdatesStatus('No se pudo instalar Deno: ' + result.error, 'error');
+      setUpdatesStatus(window.i18n.t('deno_install_failed', { error: result.error }), 'error');
     }
     return result;
   } catch (err) {
-    setUpdatesStatus('No se pudo instalar Deno: ' + err.message, 'error');
+    setUpdatesStatus(window.i18n.t('deno_install_failed', { error: err.message }), 'error');
     return { success: false, error: err.message };
   } finally {
     hideUpdateProgress('deno');
     updateDenoBtn.disabled = false;
-    updateDenoBtn.textContent = 'Actualizar';
+    updateDenoBtn.textContent = window.i18n.t('btn_update');
+    updateDenoBtn.dataset.managed = '1';
   }
 }
 
 updateDenoBtn.addEventListener('click', () => {
-  const wasManaged = updateDenoBtn.textContent === 'Actualizar';
+  const wasManaged = updateDenoBtn.dataset.managed === '1';
   runDenoUpdate(wasManaged);
 });
 
@@ -2910,7 +3841,7 @@ async function autoInstallMissingBinaries() {
   // discreto en la parte inferior de la ventana mientras se instala en
   // segundo plano.
   showStartupToast(
-    'Primera vez: instalando automáticamente ' + missing.map((m) => missingLabels[m]).join(', ') + '…'
+    window.i18n.t('installing_first_time', { items: missing.map((m) => missingLabels[m]).join(', ') })
   );
 
   const results = {};
@@ -2921,16 +3852,32 @@ async function autoInstallMissingBinaries() {
   const stillMissing = missing.filter((m) => !results[m] || !results[m].success);
 
   if (stillMissing.length === 0) {
-    showStartupToast('Listo: ya podés empezar a descargar videos.', 'success', 4000);
+    showStartupToast(window.i18n.t('ready_to_download'), 'success', 4000);
     playNotificationSoundIfEnabled();
   } else {
     showStartupToast(
-      'No se pudo instalar automáticamente: ' + stillMissing.map((m) => missingLabels[m]).join(', ') + '. Abrí ⚙ → Actualizaciones para reintentar.',
+      window.i18n.t('auto_install_failed', { items: stillMissing.map((m) => missingLabels[m]).join(', ') }),
       'error',
       8000
     );
   }
 }
+
+// Sincroniza el idioma real guardado en disco (fuente de verdad) con lo que
+// se aplicó al vuelo desde localStorage al arrancar, por si difieren (ej.
+// primer inicio en un equipo nuevo, o cambio hecho desde otra instalación).
+(async function syncLanguageFromSettings() {
+  try {
+    const settings = await window.yoinksAPI.getSettings();
+    const lang = settings && settings.language === 'en' ? 'en' : 'es';
+    if (lang !== window.i18n.getLanguage()) {
+      applyLanguage(lang);
+    }
+    if (window.yoinksAPI.setLanguage) window.yoinksAPI.setLanguage(lang);
+  } catch (e) {
+    // si falla, seguimos con el idioma ya aplicado desde localStorage
+  }
+})();
 
 loadPresets();
 checkForUpdatesSilently();

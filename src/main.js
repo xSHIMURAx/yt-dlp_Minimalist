@@ -1,8 +1,21 @@
-const { app, BrowserWindow, ipcMain, shell, dialog, session, safeStorage } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, dialog, session, safeStorage, Tray, Menu } = require('electron');
 const path = require('path');
+
+// APIs nativas como Tray (y en algunos casos el ícono de BrowserWindow) no
+// pueden leer archivos que quedan empaquetados DENTRO del .asar — solo Node
+// vía fs (patchado por Electron) puede. Por eso 'assets/icon.ico' se marca
+// como 'asarUnpack' en package.json (queda en una carpeta real en disco,
+// app.asar.unpacked/, al lado del .asar) y acá reescribimos la ruta para
+// apuntar ahí cuando la app corre empaquetada. En desarrollo (sin asar) esto
+// no hace nada, __dirname ya apunta a una carpeta real.
+function resolveAssetPath(...segments) {
+  const p = path.join(__dirname, '..', ...segments);
+  return app.isPackaged ? p.replace('app.asar', 'app.asar.unpacked') : p;
+}
 const os = require('os');
 const fs = require('fs');
 const https = require('https');
+const { startExtensionServer } = require('./extension-server');
 
 // ---- Cifrado de cookies en disco ----
 // Las cookies (login dentro de la app o archivos cookies.txt elegidos por el
@@ -174,6 +187,13 @@ function cleanupOrphanedPartialFiles(dir, sinceTime, depth = 0) {
 }
 
 let mainWindow;
+let tray = null;
+let trayShowWindow = null;
+// Se pone en true justo antes de un cierre real (desde el menú de la bandeja,
+// "Cerrar el programa" en el diálogo de pregunta, o app.quit()), para que el
+// handler de 'close' de la ventana sepa que esta vez sí debe dejarla cerrarse
+// en vez de interceptarla para preguntar/minimizar a la bandeja.
+let isQuitting = false;
 
 // Procesos de yt-dlp en ejecución, indexados por downloadId, para poder
 // pausarlos o cancelarlos desde el panel de "Descargas en curso".
@@ -210,9 +230,13 @@ function killProcessTree(proc) {
 }
 
 // ---- Presets predeterminados (mismo patrón que apps como media-downloader) ----
-// Sin preajustes por defecto: solo quedan las dos opciones incorporadas
-// ("Mejor video y audio disponible" / "Mejor audio disponible (MP3)"), que no
-// vienen de aquí sino que se generan siempre en renderer.js.
+// Antes esta lista incluía dos entradas "builtin" ("Mejor video y audio
+// disponible" / "Mejor audio disponible") para que también aparecieran,
+// editables y borrables, en el panel de administración de Preajustes
+// (⚙ → Preajustes). Se quitaron a pedido del usuario: esas dos opciones ya
+// existen aparte como filas ★ fijas en el listado de descarga (generadas en
+// renderer.js) y en el selector de calidad, así que no hace falta
+// duplicarlas también en la tabla de preajustes.
 const DEFAULT_PRESETS = [];
 
 function getPresetsPath() {
@@ -227,7 +251,19 @@ function loadPresets() {
       return DEFAULT_PRESETS;
     }
     const raw = fs.readFileSync(filePath, 'utf-8');
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    // Limpieza de instalaciones existentes: versiones anteriores guardaban
+    // en presets.json las dos entradas "builtin" (Mejor video y audio /
+    // Mejor audio disponible). Ya no se generan, así que si siguen ahí
+    // (porque el usuario nunca las tocó) se quitan una sola vez y se
+    // regrabra el archivo sin ellas. Si el usuario las había editado, el
+    // preset perdía su marcador "builtin" al guardarse y quedaba como uno
+    // normal, así que este filtro no lo toca.
+    const cleaned = Array.isArray(parsed) ? parsed.filter((p) => !p || !p.builtin) : parsed;
+    if (Array.isArray(parsed) && cleaned.length !== parsed.length) {
+      savePresetsToDisk(cleaned);
+    }
+    return cleaned;
   } catch (e) {
     return DEFAULT_PRESETS;
   }
@@ -261,25 +297,113 @@ function getDefaultSettings() {
     // tiene su propio modo, para que la app elija automáticamente según el link pegado
     // en vez de un único modo global para toda la app.
     cookiesPerSite: getDefaultCookiesPerSite(),
+    customCookieSites: [], // sitios agregados por el usuario: [{ id, name, hostname, url }]
     rateLimit: '', // ej. "1M", "500K" — vacío = sin límite
+    rateLimitMode: 'perFile', // 'perFile' = el límite se aplica a cada descarga | 'total' = se reparte entre las descargas simultáneas
     concurrentDownloads: 1, // cuántos videos de una lista se descargan a la vez
     ytdlpChannel: 'nightly', // 'stable' | 'nightly' — de qué repo de GitHub se baja/compara yt-dlp
     soundEnabled: true, // sonido al terminar una descarga o la instalación automática de dependencias
+    soundStyle: 'chime', // 'chime' (campanita, dos notas) | 'windows' (pitido del sistema, shell.beep)
+    closeBehavior: 'ask', // 'ask' | 'minimize' | 'close' — qué hacer al presionar el botón ✕ de la ventana
+    language: detectSystemLanguage(), // 'es' | 'en' — idioma de la interfaz
   };
+}
+
+// Detecta el idioma del sistema operativo (vía Electron) para usarlo como
+// idioma por defecto SOLO la primera vez que se abre la app (todavía no
+// existe settings.json). Solo soportamos español e inglés, así que
+// cualquier locale que no empiece con "es" cae a inglés; si por lo que sea
+// no se puede leer el locale del sistema, español queda como último fallback.
+function detectSystemLanguage() {
+  try {
+    const locale = (app.getLocale() || '').toLowerCase();
+    return locale.startsWith('es') ? 'es' : 'en';
+  } catch (e) {
+    return 'es';
+  }
+}
+
+// Traducciones mínimas para textos generados en el proceso principal (menú
+// de la bandeja del sistema), que no pasan por el HTML/i18n.js del renderer.
+const TRAY_STRINGS = {
+  es: { show: 'Mostrar', quit: 'Salir' },
+  en: { show: 'Show', quit: 'Quit' },
+};
+let currentTrayLanguage = 'es';
+
+// Extrae el hostname de lo que haya escrito el usuario en "URL del sitio",
+// aceptando tanto una URL completa (https://misitio.com/x) como solo el
+// dominio (misitio.com). Devuelve '' si no se puede interpretar como URL.
+function extractHostname(input) {
+  const raw = String(input || '').trim();
+  if (!raw) return '';
+  try {
+    const withProtocol = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(raw) ? raw : `https://${raw}`;
+    return new URL(withProtocol).hostname.replace(/^www\./i, '').toLowerCase();
+  } catch (e) {
+    return '';
+  }
+}
+
+// Genera un id interno único para un sitio agregado por el usuario, a partir
+// de su nombre. Siempre con el prefijo "custom-" (para no chocar nunca con
+// las claves fijas como "youtube" u "other") y solo [a-z0-9-], porque este id
+// se usa también como nombre de archivo al guardar cookies en disco.
+function slugifyCustomSiteId(name, existingIds) {
+  let base = 'custom-' + String(name || '')
+    .toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // quita acentos
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  if (base === 'custom' || base === 'custom-') base = 'custom-sitio';
+  let id = base;
+  let n = 2;
+  while (existingIds.includes(id)) {
+    id = `${base}-${n}`;
+    n++;
+  }
+  return id;
+}
+
+// Valida/normaliza la lista de sitios agregados por el usuario (Configuración
+// → Cookies → "Agregar sitio"). Cada uno necesita nombre y una URL de la que
+// se pueda sacar un hostname para la detección automática del sitio.
+function sanitizeCustomCookieSites(input) {
+  if (!Array.isArray(input)) return [];
+  const result = [];
+  const usedIds = [];
+  for (const raw of input) {
+    if (!raw || typeof raw !== 'object') continue;
+    const name = String(raw.name || '').trim().slice(0, 60);
+    const hostname = extractHostname(raw.url || raw.hostname);
+    if (!name || !hostname) continue;
+    const id = typeof raw.id === 'string' && /^custom-[a-z0-9-]+$/.test(raw.id) && !usedIds.includes(raw.id)
+      ? raw.id
+      : slugifyCustomSiteId(name, usedIds);
+    usedIds.push(id);
+    result.push({ id, name, hostname, url: raw.url ? String(raw.url).trim().slice(0, 300) : '' });
+    if (result.length >= 20) break; // límite razonable para no saturar el panel
+  }
+  return result;
 }
 
 // Valida/normaliza lo que llega desde el renderer para cookiesPerSite, para no
 // terminar guardando en disco un modo inválido o una clave de sitio inexistente.
-function sanitizeCookiesPerSite(input) {
+// extraKeys son los ids de los sitios personalizados agregados por el usuario,
+// que se validan igual que los sitios fijos pero sin permitir "applogin"
+// (no tienen ventana de login propia como YouTube/TikTok/etc.).
+function sanitizeCookiesPerSite(input, extraKeys = []) {
   const result = getDefaultCookiesPerSite();
+  const allKeys = [...COOKIE_SITE_KEYS, ...extraKeys];
   if (input && typeof input === 'object') {
-    for (const key of COOKIE_SITE_KEYS) {
+    for (const key of allKeys) {
       const entry = input[key];
       if (!entry || typeof entry !== 'object') continue;
       let mode = ['none', 'browser', 'file', 'applogin'].includes(entry.mode) ? entry.mode : 'none';
-      // "Otros sitios" no tiene ventana de login propia (ver LOGIN_SITES), así que
-      // "applogin" no aplica ahí; si llega así, lo tratamos como "none".
-      if (key === 'other' && mode === 'applogin') mode = 'none';
+      // "Otros sitios" y los sitios personalizados no tienen ventana de login
+      // propia (ver LOGIN_SITES), así que "applogin" no aplica ahí; si llega
+      // así, lo tratamos como "none".
+      if ((key === 'other' || extraKeys.includes(key)) && mode === 'applogin') mode = 'none';
       result[key] = {
         mode,
         browser: (entry.browser && String(entry.browser)) || 'firefox',
@@ -332,7 +456,12 @@ function loadSettings() {
     }
     const raw = migrateLegacyCookieSettings(JSON.parse(fs.readFileSync(filePath, 'utf-8')));
     const merged = { ...defaults, ...raw };
-    merged.cookiesPerSite = sanitizeCookiesPerSite(raw.cookiesPerSite);
+    merged.customCookieSites = sanitizeCustomCookieSites(raw.customCookieSites);
+    merged.cookiesPerSite = sanitizeCookiesPerSite(raw.cookiesPerSite, merged.customCookieSites.map((s) => s.id));
+    merged.closeBehavior = ['ask', 'minimize', 'close'].includes(merged.closeBehavior) ? merged.closeBehavior : 'ask';
+    merged.language = merged.language === 'en' ? 'en' : 'es';
+    merged.rateLimitMode = merged.rateLimitMode === 'total' ? 'total' : 'perFile';
+    merged.soundStyle = merged.soundStyle === 'windows' ? 'windows' : 'chime';
     return merged;
   } catch (e) {
     return defaults;
@@ -341,18 +470,24 @@ function loadSettings() {
 
 function saveSettingsToDisk(settings) {
   const merged = { ...getDefaultSettings(), ...settings };
-  merged.cookiesPerSite = sanitizeCookiesPerSite(settings.cookiesPerSite);
+  merged.customCookieSites = sanitizeCustomCookieSites(settings.customCookieSites);
+  merged.cookiesPerSite = sanitizeCookiesPerSite(settings.cookiesPerSite, merged.customCookieSites.map((s) => s.id));
   // Limitar a un rango razonable (1-5) para evitar saturar la red o el sistema
   const concurrent = parseInt(merged.concurrentDownloads, 10);
   merged.concurrentDownloads = Number.isFinite(concurrent) ? Math.min(5, Math.max(1, concurrent)) : 1;
+  merged.closeBehavior = ['ask', 'minimize', 'close'].includes(merged.closeBehavior) ? merged.closeBehavior : 'ask';
+  merged.language = merged.language === 'en' ? 'en' : 'es';
+  merged.rateLimitMode = merged.rateLimitMode === 'total' ? 'total' : 'perFile';
+  merged.soundStyle = merged.soundStyle === 'windows' ? 'windows' : 'chime';
   fs.writeFileSync(getSettingsPath(), JSON.stringify(merged, null, 2), 'utf-8');
   return merged;
 }
 
 // Detecta a qué sitio (de los que tienen configuración de cookies propia)
 // pertenece un link, para poder elegir automáticamente sus cookies sin que
-// el usuario tenga que ir cambiando un modo global cada vez.
-function detectCookieSite(url) {
+// el usuario tenga que ir cambiando un modo global cada vez. customSites son
+// los sitios que el propio usuario agregó desde Configuración → Cookies.
+function detectCookieSite(url, customSites = []) {
   try {
     const hostname = new URL(url).hostname.replace(/^www\./i, '').toLowerCase();
     if (hostname.endsWith('youtube.com') || hostname === 'youtu.be') return 'youtube';
@@ -361,6 +496,9 @@ function detectCookieSite(url) {
     if (hostname.endsWith('twitter.com') || hostname.endsWith('x.com')) return 'twitter';
     if (hostname.endsWith('threads.net') || hostname.endsWith('threads.com')) return 'threads';
     if (hostname.endsWith('bilibili.com') || hostname.endsWith('b23.tv')) return 'bilibili';
+    for (const site of customSites) {
+      if (site && site.hostname && hostname.endsWith(site.hostname)) return site.id;
+    }
   } catch (e) {
     // URL inválida o vacía: cae al fallback "other" de abajo
   }
@@ -389,7 +527,7 @@ function buildSettingsArgs(settings, url) {
   }
 
   const perSite = settings.cookiesPerSite || getDefaultCookiesPerSite();
-  const site = detectCookieSite(url);
+  const site = detectCookieSite(url, settings.customCookieSites || []);
   const siteConfig = perSite[site] || perSite.other;
 
   if (siteConfig.mode === 'browser' && siteConfig.browser) {
@@ -422,10 +560,39 @@ function buildSettingsArgs(settings, url) {
   }
 
   if (settings.rateLimit && settings.rateLimit.trim()) {
-    args.push('--limit-rate', settings.rateLimit.trim());
+    args.push('--limit-rate', computeEffectiveRateLimit(settings));
   }
 
   return { args, tempFiles };
+}
+
+// Calcula el valor que se le pasa a --limit-rate según el modo elegido en
+// Configuración → Descarga:
+// - "perFile": el valor tal cual, se aplica completo a cada descarga.
+// - "total": se reparte entre las "Descargas simultáneas" configuradas, para
+//   que la suma de todas las descargas en curso no supere el límite indicado.
+//   (Solo tiene efecto real durante descargas de playlist con concurrencia > 1;
+//   en descargas individuales, con un solo proceso, el resultado es el mismo
+//   que "por archivo".)
+function computeEffectiveRateLimit(settings) {
+  const raw = settings.rateLimit.trim();
+  if (settings.rateLimitMode !== 'total') return raw;
+
+  const concurrency = Math.max(1, Math.min(5, parseInt(settings.concurrentDownloads, 10) || 1));
+  if (concurrency <= 1) return raw;
+
+  const match = raw.match(/^([\d.]+)\s*([a-zA-Z]*)$/);
+  if (!match) return raw; // formato no reconocido: se deja tal cual
+
+  const [, numStr, unit] = match;
+  const num = parseFloat(numStr);
+  if (!Number.isFinite(num) || num <= 0) return raw;
+
+  const divided = num / concurrency;
+  // yt-dlp acepta decimales (ej. "333.33K"); se limita a 2 decimales para
+  // que quede prolijo y se recorta el ".00" sobrante si el resultado es entero.
+  const roundedStr = divided.toFixed(2).replace(/\.?0+$/, '');
+  return `${roundedStr}${unit}`;
 }
 
 // ---- "Iniciar sesión con cuenta": abre una ventana de Electron con el sitio real
@@ -644,7 +811,7 @@ function createWindow() {
     backgroundColor: '#0d0d0d',
     frame: false, // quitamos el marco nativo para dibujar nuestra propia "barra de título" tipo terminal
     titleBarStyle: 'hidden',
-    icon: path.join(__dirname, '..', 'assets', 'icon.png'),
+    icon: resolveAssetPath('assets', 'icon.ico'), // 'icon.png' no existe en assets/, solo 'icon.ico'
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -663,13 +830,268 @@ function createWindow() {
     return { action: 'deny' };
   });
 
-  // Descomenta para depurar:
-  // mainWindow.webContents.openDevTools({ mode: 'detach' });
+  // Botón ✕ de la ventana: según lo configurado en Ajustes, minimizamos a la
+  // bandeja del sistema, cerramos el programa directamente, o preguntamos.
+  mainWindow.on('close', (event) => {
+    if (isQuitting) return; // cierre real ya decidido (menú de la bandeja, "Cerrar", etc.)
+
+    const settings = loadSettings();
+    if (settings.closeBehavior === 'minimize') {
+      event.preventDefault();
+      mainWindow.hide();
+      return;
+    }
+    if (settings.closeBehavior === 'close') {
+      return; // se deja cerrar normalmente
+    }
+
+    // 'ask' (o cualquier valor inválido): preguntamos con un diálogo nativo.
+    event.preventDefault();
+    askCloseBehavior();
+  });
 }
 
+// Se pone en true mientras el diálogo "¿Qué querés hacer?" está visible en el
+// renderer, para no disparar otro si el usuario presiona ✕ de nuevo mientras
+// tanto (ej. doble clic, o Alt+F4 repetido).
+let closeAskPending = false;
+
+// Le pide al renderer que muestre el diálogo propio (mismo estilo que el
+// resto de la app) preguntando si minimizar a la bandeja o cerrar. La
+// respuesta llega por el canal 'close:behavior-response' (ver más abajo).
+function askCloseBehavior() {
+  if (!mainWindow || closeAskPending) return;
+  closeAskPending = true;
+  mainWindow.webContents.send('close:ask-behavior');
+}
+
+ipcMain.on('close:behavior-response', (_event, payload) => {
+  closeAskPending = false;
+  if (!mainWindow) return;
+  const { action, remember } = payload || {};
+  if (action === 'minimize') {
+    mainWindow.hide();
+    if (remember) saveSettingsToDisk({ ...loadSettings(), closeBehavior: 'minimize' });
+  } else if (action === 'close') {
+    if (remember) saveSettingsToDisk({ ...loadSettings(), closeBehavior: 'close' });
+    isQuitting = true;
+    mainWindow.close();
+  }
+  // action === 'cancel' (o nada): no se hace nada, la ventana sigue abierta.
+});
+
+// Ícono en la bandeja del sistema (junto al reloj/volumen). Aparece siempre
+// que la app está corriendo, para poder restaurar la ventana después de
+// minimizarla ahí y para poder salir del programa desde ese menú.
+function buildTrayMenu(showWindow) {
+  const s = TRAY_STRINGS[currentTrayLanguage] || TRAY_STRINGS.es;
+  return Menu.buildFromTemplate([
+    { label: s.show, click: showWindow },
+    { type: 'separator' },
+    {
+      label: s.quit,
+      click: () => {
+        isQuitting = true;
+        app.quit();
+      },
+    },
+  ]);
+}
+
+function createTray() {
+  if (tray) return;
+  tray = new Tray(resolveAssetPath('assets', 'icon.ico'));
+  tray.setToolTip('YT-DLP Minimalist');
+
+  const showWindow = () => {
+    if (!mainWindow) return;
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+  };
+  trayShowWindow = showWindow;
+
+  tray.setContextMenu(buildTrayMenu(showWindow));
+  tray.on('click', showWindow); // clic simple también restaura (comportamiento habitual en Windows)
+  tray.on('double-click', showWindow);
+}
+
+// Reconstruye el menú de la bandeja con el idioma actual (llamado cuando el
+// usuario cambia el idioma desde Configuración → General).
+function refreshTrayLanguage(lang) {
+  currentTrayLanguage = lang === 'en' ? 'en' : 'es';
+  if (tray && trayShowWindow) {
+    tray.setContextMenu(buildTrayMenu(trayShowWindow));
+  }
+}
+
+// Recibe una URL enviada desde la extensión del navegador, trae la ventana
+// al frente y se la pasa al renderer para que dispare el mismo flujo que
+// usa cuando el usuario pega un link a mano (ver 'extension:url' en preload.js
+// y renderer.js).
+function handleUrlFromExtension(url) {
+  if (!mainWindow) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+  mainWindow.webContents.send('extension:url', url);
+}
+
+// Entrega "a prueba de balas" del link con el que la app se lanzó en frío
+// (ytdlpminimalist://...). Antes se confiaba en un solo intento anclado a
+// 'did-finish-load', asumiendo que el renderer ya iba a estar escuchando
+// para ese momento — pero en la práctica seguía perdiéndose a veces (build
+// empaquetada, primer arranque con SmartScreen de por medio, máquina lenta,
+// etc.), y la app abría vacía. Ahora en cambio reintentamos mandar el
+// mismo link cada 400ms hasta que el renderer confirma por IPC que lo
+// aplicó ('extension:url-ack'), o hasta agotar los reintentos.
+function startPendingUrlDelivery(url) {
+  pendingExtensionUrl = url;
+  if (pendingUrlRetryTimer) clearInterval(pendingUrlRetryTimer);
+
+  let attempts = 0;
+  const MAX_ATTEMPTS = 15; // ~6 segundos de margen en total
+
+  const tryDeliver = () => {
+    attempts += 1;
+    if (!pendingExtensionUrl || !mainWindow) {
+      clearInterval(pendingUrlRetryTimer);
+      pendingUrlRetryTimer = null;
+      return;
+    }
+    handleUrlFromExtension(pendingExtensionUrl);
+    if (attempts >= MAX_ATTEMPTS) {
+      clearInterval(pendingUrlRetryTimer);
+      pendingUrlRetryTimer = null;
+    }
+  };
+
+  tryDeliver(); // primer intento inmediato
+  pendingUrlRetryTimer = setInterval(tryDeliver, 400);
+}
+
+// ---- Protocolo personalizado (ytdlpminimalist://) ----
+// Respaldo para cuando la extensión del navegador no puede llegar al
+// servidor HTTP local (por ejemplo porque la app todavía no está abierta):
+// en ese caso la extensión navega a "ytdlpminimalist://add-url?url=...", el
+// sistema operativo lanza esta app (o la trae al frente si ya está
+// corriendo, ver 'second-instance' más abajo), y acá extraemos la URL real
+// de ese link para pasarla al mismo flujo de siempre.
+const PROTOCOL_SCHEME = 'ytdlpminimalist';
+
+// Guarda el link con el que la app se lanzó en frío (proceso recién
+// arrancado a partir de ytdlpminimalist://...) hasta que el renderer lo
+// pida (ver 'extension:get-pending-url'). Antes se intentaba empujarlo con
+// un solo 'did-finish-load', pero esa carrera contra el arranque del
+// renderer a veces perdía el link (la app abría, pero no se agregaba nada,
+// y había que reenviarlo desde la extensión con la app ya corriendo).
+let pendingExtensionUrl = null;
+// Timer de reintentos del link pendiente (ver más abajo, junto a
+// 'extension:url-ack'). Se limpia apenas el renderer confirma que ya lo
+// aplicó, o después de agotar los reintentos.
+let pendingUrlRetryTimer = null;
+
+if (!app.isDefaultProtocolClient(PROTOCOL_SCHEME)) {
+  app.setAsDefaultProtocolClient(PROTOCOL_SCHEME);
+}
+
+function extractUrlFromProtocolLink(link) {
+  if (!link || !link.startsWith(`${PROTOCOL_SCHEME}://`)) return null;
+  try {
+    // "ytdlpminimalist://add-url?url=<encoded>" — nos interesa el param "url".
+    const parsed = new URL(link);
+    const encoded = parsed.searchParams.get('url');
+    if (!encoded) return null;
+    const decoded = decodeURIComponent(encoded);
+    const check = new URL(decoded); // valida que sea una URL http(s) real
+    if (check.protocol !== 'http:' && check.protocol !== 'https:') return null;
+    return decoded;
+  } catch (e) {
+    return null;
+  }
+}
+
+// Busca un link "ytdlpminimalist://..." entre los argumentos con los que se
+// lanzó el proceso (Windows se los pasa como argv al abrir el protocolo).
+function findProtocolLinkInArgv(argv) {
+  for (const arg of argv || []) {
+    if (typeof arg === 'string' && arg.startsWith(`${PROTOCOL_SCHEME}://`)) {
+      return arg;
+    }
+  }
+  return null;
+}
+
+function handleProtocolLink(link) {
+  const url = extractUrlFromProtocolLink(link);
+  if (url) handleUrlFromExtension(url);
+}
+
+// Solo una instancia de la app a la vez: si el usuario dispara el protocolo
+// mientras la app ya está abierta, Windows abre un segundo proceso nomás
+// para pasarle el argumento y este se cierra enseguida, reenviándole el
+// link a la instancia original vía 'second-instance'.
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+
+if (!gotSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on('second-instance', (_event, argv) => {
+    const link = findProtocolLinkInArgv(argv);
+    if (link) {
+      handleProtocolLink(link);
+    } else if (mainWindow) {
+      // Alguien intentó abrir la app de nuevo sin un link (ej. doble clic
+      // en el acceso directo): solo la traemos al frente.
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+    }
+  });
+}
+
+// macOS entrega los links de protocolo por este evento en vez de argv.
+app.on('open-url', (event, url) => {
+  event.preventDefault();
+  handleProtocolLink(url);
+});
+
 app.whenReady().then(() => {
-  migrateLegacyCookieFiles();
+  // El link con el que se abrió la app (si lo hay) se resuelve apenas se
+  // crea la ventana, ANTES de tray/servidor/ffmpeg, a propósito: así un
+  // fallo en cualquiera de esas otras cosas (ver try/catch abajo) nunca
+  // puede volver a bloquear la entrega del link pendiente a la ventana.
   createWindow();
+
+  const launchLink = findProtocolLinkInArgv(process.argv);
+  if (launchLink) {
+    const url = extractUrlFromProtocolLink(launchLink);
+    if (url) startPendingUrlDelivery(url);
+  }
+
+  try {
+    migrateLegacyCookieFiles();
+  } catch (e) {
+    console.error('[main] Error en migrateLegacyCookieFiles:', e);
+  }
+
+  try {
+    currentTrayLanguage = (loadSettings().language === 'en') ? 'en' : 'es';
+  } catch (e) {
+    console.error('[main] Error en loadSettings:', e);
+  }
+
+  try {
+    createTray();
+  } catch (e) {
+    console.error('[main] Error en createTray:', e);
+  }
+
+  try {
+    startExtensionServer(handleUrlFromExtension);
+  } catch (e) {
+    console.error('[main] Error en startExtensionServer:', e);
+  }
 
   // Descarga ffmpeg a la carpeta administrada en segundo plano si todavía no
   // está ahí (ej. primer arranque de la app), para que esté listo cuando el
@@ -683,13 +1105,50 @@ app.whenReady().then(() => {
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
+}).catch((e) => {
+  // Red de seguridad: si algo revienta en cualquier punto de este bloque
+  // que no quedó cubierto por un try/catch de arriba, que quede logueado
+  // en vez de perderse como unhandled rejection silenciosa.
+  console.error('[main] Error fatal en app.whenReady():', e);
 });
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
 
+app.on('before-quit', () => {
+  isQuitting = true;
+  if (terminalProc) {
+    killProcessTree(terminalProc);
+    terminalProc = null;
+  }
+});
+
 // ---- Leer portapapeles ----
+// Link pendiente de un arranque en frío por protocolo (ver más arriba). El
+// renderer lo pide una sola vez al terminar de cargar; se devuelve y se
+// limpia en el mismo llamado para no volver a aplicarlo dos veces (ej. si
+// el usuario recarga la ventana con Ctrl+R).
+ipcMain.handle('extension:get-pending-url', () => {
+  const url = pendingExtensionUrl;
+  pendingExtensionUrl = null;
+  if (pendingUrlRetryTimer) {
+    clearInterval(pendingUrlRetryTimer);
+    pendingUrlRetryTimer = null;
+  }
+  return url;
+});
+
+// El renderer confirma que ya aplicó el link (lo pegó en el input y
+// disparó la búsqueda de formatos): dejamos de reenviarlo por 'extension:url'.
+ipcMain.on('extension:url-ack', () => {
+  pendingExtensionUrl = null;
+  if (pendingUrlRetryTimer) {
+    clearInterval(pendingUrlRetryTimer);
+    pendingUrlRetryTimer = null;
+  }
+});
+
 ipcMain.handle('clipboard:read', async () => {
   try {
     const { clipboard } = require('electron');
@@ -722,6 +1181,100 @@ ipcMain.on('open-downloads', () => {
 });
 
 // ---- Presets: listar, guardar, agregar, eliminar, restablecer ----
+// ---- Modo Terminal (ejecutar un comando de yt-dlp "en crudo") ----
+// Le permite al usuario escribir los argumentos que le pasaría a yt-dlp
+// directamente en la terminal (ej. "-f bestaudio --extract-audio <url>") y
+// ver la salida en vivo, para casos que las opciones de la interfaz no
+// cubren. Solo se permite un comando corriendo a la vez.
+let terminalProc = null;
+
+// Separa una línea de comando en argumentos, respetando texto entre
+// comillas simples o dobles (para poder pasar, por ejemplo, un -o con
+// espacios en la plantilla). Tokenizer simple, no soporta comillas
+// escapadas dentro de comillas del mismo tipo (\" dentro de "…"), que no
+// hace falta para el uso típico de argumentos de yt-dlp.
+function tokenizeCommand(str) {
+  const tokens = [];
+  const re = /"([^"]*)"|'([^']*)'|(\S+)/g;
+  let match;
+  while ((match = re.exec(str)) !== null) {
+    tokens.push(match[1] !== undefined ? match[1] : match[2] !== undefined ? match[2] : match[3]);
+  }
+  return tokens;
+}
+
+ipcMain.handle('terminal:run', (_event, commandStr) => {
+  // Si ya había un comando corriendo (el usuario le dio "Ejecutar" de nuevo
+  // sin esperar), lo cortamos antes de arrancar el nuevo.
+  if (terminalProc) {
+    killProcessTree(terminalProc);
+    terminalProc = null;
+  }
+
+  let tokens = tokenizeCommand((commandStr || '').trim());
+  // Si el usuario pegó el comando completo tal como lo copió de la
+  // documentación (empezando con "yt-dlp" o "yt-dlp.exe"), se lo sacamos:
+  // el binario ya lo ponemos nosotros.
+  if (tokens[0] && /^yt-dlp(\.exe)?$/i.test(tokens[0])) {
+    tokens = tokens.slice(1);
+  }
+  if (!tokens.length) {
+    return { started: false, error: 'no_command' };
+  }
+
+  // Si el usuario no especificó dónde guardar el archivo (-o/--output o
+  // -P/--paths), usamos la misma carpeta y plantilla de nombre configuradas
+  // en Configuración → Descargas, igual que hace una descarga normal desde
+  // la interfaz. Así el modo Terminal no termina guardando en una carpeta
+  // distinta (la carpeta de trabajo de la app) sin que el usuario lo note.
+  const hasOutputArg = tokens.some((t) =>
+    ['-o', '--output', '-P', '--paths'].includes(t) || /^--output=/.test(t) || /^--paths=/.test(t)
+  );
+  if (!hasOutputArg) {
+    const settings = loadSettings();
+    const downloadsPath = settings.downloadPath && settings.downloadPath.trim()
+      ? settings.downloadPath.trim()
+      : path.join(os.homedir(), 'Downloads');
+    const template = settings.outputTemplate && settings.outputTemplate.trim()
+      ? settings.outputTemplate.trim()
+      : '%(title)s.%(ext)s';
+    tokens = ['-o', path.join(downloadsPath, template), ...tokens];
+  }
+
+  const ytdlpPath = getYtDlpPath();
+  const utf8Env = { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1' };
+  const { spawn } = require('child_process');
+  const proc = spawn(ytdlpPath, tokens, { env: utf8Env });
+  terminalProc = proc;
+
+  const send = (stream, text) => {
+    if (mainWindow) mainWindow.webContents.send('terminal:output', { stream, text });
+  };
+
+  proc.stdout.on('data', (chunk) => send('stdout', chunk.toString()));
+  proc.stderr.on('data', (chunk) => send('stderr', chunk.toString()));
+
+  proc.on('error', (err) => {
+    send('stderr', `\n[error] ${err.message}\n`);
+  });
+
+  proc.on('close', (code) => {
+    if (terminalProc === proc) terminalProc = null;
+    if (mainWindow) mainWindow.webContents.send('terminal:done', { code });
+  });
+
+  return { started: true };
+});
+
+// Corta el comando en curso (mismo mecanismo que pausar/cancelar una
+// descarga normal: mata todo el árbol de procesos, no solo el lanzador).
+ipcMain.on('terminal:stop', () => {
+  if (terminalProc) {
+    killProcessTree(terminalProc);
+    terminalProc = null;
+  }
+});
+
 ipcMain.handle('presets:list', () => loadPresets());
 
 ipcMain.handle('presets:add', (_event, preset) => {
@@ -749,9 +1302,18 @@ ipcMain.handle('presets:reset', () => savePresetsToDisk([...DEFAULT_PRESETS]));
 // ---- Configuración de descarga: obtener, guardar, restablecer ----
 ipcMain.handle('settings:get', () => loadSettings());
 
-ipcMain.handle('settings:save', (_event, settings) => saveSettingsToDisk(settings));
+ipcMain.handle('settings:save', (_event, settings) => {
+  const saved = saveSettingsToDisk(settings);
+  refreshTrayLanguage(saved.language);
+  return saved;
+});
 
 ipcMain.handle('settings:reset', () => saveSettingsToDisk(getDefaultSettings()));
+
+// El renderer avisa explícitamente cuando el usuario cambia el idioma (además
+// de guardarlo dentro de settings:save) para que el menú de la bandeja se
+// actualice al instante, sin esperar a que se abra/cierre el panel General.
+ipcMain.on('language:set', (_event, lang) => refreshTrayLanguage(lang));
 
 // Sonido de notificación (descarga terminada / instalación automática de
 // dependencias terminada). Se usa el sonido de sistema de Windows, igual que
@@ -817,15 +1379,16 @@ ipcMain.handle('dialog:select-cookies-file', async (_event, site) => {
     properties: ['openFile'],
     filters: [
       { name: 'Cookies', extensions: ['txt'] },
-      { name: 'Todos los archivos', extensions: ['*'] },
+      { name: currentTrayLanguage === 'en' ? 'All files' : 'Todos los archivos', extensions: ['*'] },
     ],
   });
   if (result.canceled || result.filePaths.length === 0) return null;
 
   const sourcePath = result.filePaths[0];
   // Si el sitio no es válido (o no se pasó), devolvemos la ruta original tal
-  // cual, como antes, en vez de copiarla a ningún lado.
-  if (!site || !COOKIE_SITE_KEYS.includes(site)) return sourcePath;
+  // cual, como antes, en vez de copiarla a ningún lado. Los sitios personalizados
+  // agregados por el usuario tienen ids con el formato "custom-<slug>".
+  if (!site || !(COOKIE_SITE_KEYS.includes(site) || /^custom-[a-z0-9-]{1,80}$/.test(site))) return sourcePath;
 
   // Copiamos (cifrado) el archivo elegido a la carpeta de configuración de la app
   // (C:\Users\...\AppData\Roaming\yt-dlp-interface\file-cookies\<sitio>.enc)
@@ -841,6 +1404,67 @@ ipcMain.handle('dialog:select-cookies-file', async (_event, site) => {
     // al usuario: usamos la ruta original como hacía la app antes de este cambio.
     return sourcePath;
   }
+});
+
+// Agrega un sitio personalizado (Configuración → Cookies → "Agregar sitio").
+// Se persiste de inmediato (no solo en el borrador del panel), para no perder
+// el sitio si el usuario cierra el panel antes de tocar "Guardar".
+ipcMain.handle('cookies:add-custom-site', (_event, { name, url } = {}) => {
+  const cleanName = String(name || '').trim().slice(0, 60);
+  const hostname = extractHostname(url);
+  if (!cleanName || !hostname) {
+    const msg = currentTrayLanguage === 'en'
+      ? 'Enter a valid site name and URL.'
+      : 'Ingresá un nombre y una URL válidos para el sitio.';
+    throw new Error(msg);
+  }
+  const settings = loadSettings();
+  const existingIds = settings.customCookieSites.map((s) => s.id);
+  const id = slugifyCustomSiteId(cleanName, existingIds);
+  const newSite = { id, name: cleanName, hostname, url: String(url).trim().slice(0, 300) };
+  settings.customCookieSites.push(newSite);
+  saveSettingsToDisk(settings);
+  return newSite;
+});
+
+// Edita el nombre/URL de un sitio personalizado ya existente. Mantiene el
+// mismo id (para no perder la configuración de cookies ya guardada de ese sitio).
+ipcMain.handle('cookies:update-custom-site', (_event, { id, name, url } = {}) => {
+  const cleanName = String(name || '').trim().slice(0, 60);
+  const hostname = extractHostname(url);
+  if (!id || !cleanName || !hostname) {
+    const msg = currentTrayLanguage === 'en'
+      ? 'Enter a valid site name and URL.'
+      : 'Ingresá un nombre y una URL válidos para el sitio.';
+    throw new Error(msg);
+  }
+  const settings = loadSettings();
+  const idx = settings.customCookieSites.findIndex((s) => s.id === id);
+  if (idx === -1) {
+    const msg = currentTrayLanguage === 'en' ? 'Site not found.' : 'No se encontró el sitio.';
+    throw new Error(msg);
+  }
+  const updated = { id, name: cleanName, hostname, url: String(url).trim().slice(0, 300) };
+  settings.customCookieSites[idx] = updated;
+  saveSettingsToDisk(settings);
+  return updated;
+});
+
+// Quita un sitio personalizado y su configuración de cookies asociada.
+ipcMain.handle('cookies:remove-custom-site', (_event, id) => {
+  const settings = loadSettings();
+  settings.customCookieSites = settings.customCookieSites.filter((s) => s.id !== id);
+  if (settings.cookiesPerSite) delete settings.cookiesPerSite[id];
+  const saved = saveSettingsToDisk(settings);
+  // Borramos también el archivo de cookies (cifrado) que hubiera quedado
+  // guardado para ese sitio, si lo había.
+  try {
+    const filePath = getFileCookiesPath(id);
+    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+  } catch (e) {
+    // no crítico: si falla el borrado del archivo viejo, no bloqueamos al usuario
+  }
+  return saved.customCookieSites;
 });
 
 // ---- Actualización de yt-dlp y FFmpeg ----
@@ -935,12 +1559,33 @@ ipcMain.handle('history:clear', () => saveHistoryToDisk([]));
 
 ipcMain.on('history:open-file', (_event, filePath) => {
   if (!filePath) return;
-  // Si el archivo ya no existe (se movió/borró), al menos abrimos la carpeta de descargas
+
+  // Camino normal: el archivo sigue ahí, se lo mostramos seleccionado en el
+  // explorador.
   if (fs.existsSync(filePath)) {
     shell.showItemInFolder(filePath);
-  } else {
-    shell.openPath(path.join(os.homedir(), 'Downloads'));
+    return;
   }
+
+  // El archivo exacto no está (se movió/borró, o el nombre no se pudo leer
+  // bien de la salida de yt-dlp por temas de codificación con caracteres
+  // especiales). Antes de rendirnos, probamos con la carpeta que lo
+  // contenía: casi siempre sigue existiendo aunque el nombre del archivo en
+  // sí no haya calzado exacto.
+  const parentDir = path.dirname(filePath);
+  if (parentDir && fs.existsSync(parentDir)) {
+    shell.openPath(parentDir);
+    return;
+  }
+
+  // Último recurso: la carpeta de descarga configurada por el usuario en
+  // Ajustes (no la de Windows por defecto, que puede no tener nada que ver
+  // si el usuario la cambió).
+  const settings = loadSettings();
+  const fallbackDir = settings.downloadPath && settings.downloadPath.trim()
+    ? settings.downloadPath.trim()
+    : path.join(os.homedir(), 'Downloads');
+  shell.openPath(fallbackDir);
 });
 
 // ---- Lógica de descarga con yt-dlp ----
@@ -1209,6 +1854,23 @@ ipcMain.handle('app:download', async (event, { url, formatId, audioOnly, audioFo
     // llegaba junto con otra en el mismo bloque).
     let stdoutBuffer = '';
     function processStdoutLine(line) {
+      // Línea típica de progreso de yt-dlp:
+      // "[download]  33.0% of   10.00MiB at    1.23MiB/s ETA 00:07"
+      // A veces la velocidad o el ETA vienen como "Unknown" mientras yt-dlp
+      // todavía no tiene suficientes datos para calcularlos; en ese caso no
+      // se manda ese campo (queda null) para que la UI simplemente no lo muestre.
+      const percentMatch = line.match(/\[download\]\s+(\d{1,3}\.\d)%/);
+      if (percentMatch) {
+        const speedMatch = line.match(/\bat\s+([\d.]+\S*\/s)/i);
+        const etaMatch = line.match(/\bETA\s+(\d[\d:]*)/i);
+        mainWindow.webContents.send('app:progress', {
+          id: downloadId,
+          percent: parseFloat(percentMatch[1]),
+          speed: speedMatch ? speedMatch[1] : null,
+          eta: etaMatch ? etaMatch[1] : null,
+        });
+      }
+
       const destMatch =
         line.match(/\[(?:Merger|ExtractAudio|download)\] Destination:\s*(.+)/) ||
         line.match(/Merging formats into "(.+)"/) ||
@@ -1226,10 +1888,6 @@ ipcMain.handle('app:download', async (event, { url, formatId, audioOnly, audioFo
 
     proc.stdout.on('data', (chunk) => {
       const text = chunk.toString();
-      const match = text.match(/(\d{1,3}\.\d)%/);
-      if (match) {
-        mainWindow.webContents.send('app:progress', { id: downloadId, percent: parseFloat(match[1]) });
-      }
       // yt-dlp usa \r para refrescar la línea de progreso en la misma
       // posición; se normaliza a \n para poder partir por línea sin perder
       // esas actualizaciones como si fueran una sola línea gigante.
@@ -1409,9 +2067,11 @@ const COOKIE_SITE_LABELS_MAIN = {
 // error más preciso si el video igual pide iniciar sesión.
 function getCookieContextForUrl(settings, url) {
   const perSite = settings.cookiesPerSite || getDefaultCookiesPerSite();
-  const site = detectCookieSite(url);
+  const customSites = settings.customCookieSites || [];
+  const site = detectCookieSite(url, customSites);
   const siteConfig = perSite[site] || perSite.other;
-  const siteLabel = COOKIE_SITE_LABELS_MAIN[site] || site;
+  const customSite = customSites.find((s) => s.id === site);
+  const siteLabel = customSite ? customSite.name : (COOKIE_SITE_LABELS_MAIN[site] || site);
 
   if (siteConfig.mode === 'browser' && siteConfig.browser) {
     return { active: true, mode: 'browser', siteLabel };

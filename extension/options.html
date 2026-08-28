@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>Ajustes — YT-DLP Minimalist</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 32px;
+      background: #0d0d0d;
+      color: #e6e6e6;
+      font-family: -apple-system, "Segoe UI", Arial, sans-serif;
+      max-width: 480px;
+    }
+    h1 {
+      font-size: 16px;
+      margin: 0 0 4px;
+      color: #f5f5f5;
+    }
+    p.subtitle {
+      font-size: 13px;
+      color: #a0a0a0;
+      margin: 0 0 22px;
+    }
+    fieldset {
+      border: 1px solid #2a2a2a;
+      border-radius: 10px;
+      padding: 6px;
+      margin: 0;
+    }
+    legend {
+      font-size: 12px;
+      color: #a0a0a0;
+      padding: 0 6px;
+    }
+    label.option {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 10px;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    label.option:hover {
+      background: #171717;
+    }
+    label.option input {
+      accent-color: #f5f5f5;
+      width: 16px;
+      height: 16px;
+    }
+    .option-text {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .option-title {
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .option-desc {
+      font-size: 12px;
+      color: #999;
+    }
+    #saved {
+      margin-top: 14px;
+      font-size: 12px;
+      color: #f5f5f5;
+      opacity: 0;
+      transition: opacity 0.2s ease;
+    }
+    #saved.show {
+      opacity: 1;
+    }
+  </style>
+</head>
+<body>
+  <h1>YT-DLP Minimalist</h1>
+  <p class="subtitle">Elegí cómo se ve el botón flotante que aparece sobre los videos.</p>
+
+  <fieldset>
+    <legend>Botón flotante</legend>
+    <label class="option">
+      <input type="radio" name="mode" value="icon" />
+      <span class="option-text">
+        <span class="option-title">Solo ícono (compacto)</span>
+        <span class="option-desc">50×20px, pegado a la esquina del video.</span>
+      </span>
+    </label>
+    <label class="option">
+      <input type="radio" name="mode" value="text" />
+      <span class="option-text">
+        <span class="option-title">Ícono + texto "Descargar"</span>
+        <span class="option-desc">Más visible, con el texto al lado del ícono.</span>
+      </span>
+    </label>
+  </fieldset>
+
+  <div id="saved">Guardado ✓</div>
+
+  <script src="options.js"></script>
+</body>
+</html>

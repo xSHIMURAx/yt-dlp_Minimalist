@@ -1147,11 +1147,19 @@ html, body {
 }
 
 /* En los preajustes ("Mejor video y audio" / "Mejor audio"), la fila es flex
-   (no grid), así que el select de formato no debe estirarse al 100%: se
-   empuja al extremo derecho, igual que hacen .size/.tag en esas filas. */
+   (no grid): el select de formato y el peso estimado se agrupan en
+   .preset-best-trailing, que se empuja como bloque al extremo derecho
+   (igual que hacen .tag / .size sueltos en las filas de preajustes
+   guardados por el usuario). */
+.download-item.preset-item .preset-best-trailing {
+  display: flex;
+  align-items: center;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
 .download-item.preset-item .ext-select {
   width: auto;
-  margin-left: auto;
   flex-shrink: 0;
 }
 
@@ -1795,28 +1803,64 @@ kbd {
 }
 
 .video-info-playlist-list {
-  max-height: 200px;
+  max-height: 260px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 4px;
   background: #141414;
   border: 1px solid var(--border);
   border-radius: 4px;
-  padding: 8px 10px;
 }
 
 .video-info-playlist-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
   font-size: 12px;
   color: var(--fg-dim);
-  white-space: nowrap;
+  border-bottom: 1px solid #1a1a1a;
+  /* Sin esto, al haber muchas filas (una playlist larga) el contenedor flex
+     en columna las "aplasta" verticalmente para que todas entren en su
+     max-height, en vez de dejarlas con su alto natural y scrollear (que es
+     lo que ya permite overflow-y:auto en el contenedor padre). Resultado:
+     el texto queda comprimido/ilegible. flex-shrink:0 fuerza a cada fila a
+     mantener su alto de línea normal. */
+  flex-shrink: 0;
+}
+
+.video-info-playlist-row:last-child {
+  border-bottom: none;
+}
+
+.video-info-playlist-thumb {
+  width: 40px;
+  height: 24px;
+  object-fit: cover;
+  border-radius: 2px;
+  background: #1a1a1a;
+  flex-shrink: 0;
+}
+
+.video-info-playlist-title {
+  flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg);
+}
+
+.video-info-playlist-duration {
+  color: var(--fg-dimmer);
+  font-size: 11px;
+  flex-shrink: 0;
 }
 
 .video-info-playlist-more {
   color: var(--fg-dimmer);
   font-style: italic;
+  padding: 6px 10px;
+  flex-shrink: 0;
 }
 
 .video-info-status {
@@ -2077,6 +2121,68 @@ kbd {
   display: none;
 }
 
+/* ---------- Diálogo "¿Qué querés hacer?" al presionar ✕ ---------- */
+.confirm-dialog {
+  width: 420px;
+  max-width: 90%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.confirm-dialog-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--fg-dim);
+  margin-bottom: 8px;
+}
+
+.confirm-dialog-icon {
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
+  border-radius: 50%;
+  background: var(--accent-cyan);
+  color: #0d0d0d;
+  font-style: italic;
+  font-weight: 700;
+  font-family: Georgia, serif;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+}
+
+.confirm-dialog-title {
+  font-size: 14px;
+  color: var(--fg);
+  font-weight: 600;
+  margin: 0 0 6px;
+}
+
+.confirm-dialog-text {
+  font-size: 12.5px;
+  color: var(--fg-dim);
+  line-height: 1.5;
+  margin: 0 0 14px;
+}
+
+.confirm-dialog-checkbox {
+  margin-bottom: 6px;
+}
+
+.confirm-dialog-actions {
+  padding: 10px 0 0;
+  border-top: 1px solid var(--border);
+  margin-top: 8px;
+}
+
 /* ---------- Panel de Actualizaciones (yt-dlp / FFmpeg) ---------- */
 .update-row {
   display: flex;
@@ -2173,6 +2279,49 @@ kbd {
   color: var(--fg-dimmer);
   min-width: 34px;
   text-align: right;
+}
+
+.active-dl-speed-text {
+  flex-shrink: 0;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--fg-dimmer);
+  white-space: nowrap;
+}
+
+.active-dl-speed-text.hidden {
+  display: none;
+}
+
+/* ---------- Barra resumen de velocidad total (pestaña "Descargas en curso") ---------- */
+.downloads-speed-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.02);
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--fg);
+}
+
+.downloads-speed-summary.hidden {
+  display: none;
+}
+
+.downloads-speed-summary-icon {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+#downloads-speed-summary-text {
+  color: var(--fg-dim);
+}
+
+#downloads-speed-summary-text strong {
+  color: var(--accent);
+  font-weight: 600;
 }
 
 /* ---------- Panel de Configuración de Descarga ---------- */
@@ -2295,14 +2444,14 @@ kbd {
 .history-item {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 16px;
+  gap: 12px;
+  padding: 16px 18px;
   border-bottom: 1px solid #1a1a1a;
 }
 
 .history-item-thumb {
-  width: 56px;
-  height: 32px;
+  width: 72px;
+  height: 44px;
   border-radius: 4px;
   object-fit: cover;
   flex-shrink: 0;
@@ -2317,7 +2466,7 @@ kbd {
 
 .history-item-title {
   color: var(--fg);
-  font-size: 12.5px;
+  font-size: 13px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2325,8 +2474,8 @@ kbd {
 
 .history-item-meta {
   color: var(--fg-dimmer);
-  font-size: 11px;
-  margin-top: 3px;
+  font-size: 11.5px;
+  margin-top: 5px;
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
@@ -2537,4 +2686,285 @@ kbd {
 
 .titlebar-shimura:hover {
   text-decoration: underline;
+}
+
+/* ---- Panel de Terminal (ejecutar comandos de yt-dlp "en crudo") ---- */
+.terminal-panel {
+  width: 720px;
+  height: 520px;
+}
+
+.terminal-output {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 16px;
+  background: #0a0a0a;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--fg-dim);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.terminal-output .terminal-line-stderr {
+  color: #e06c75;
+}
+
+.terminal-output .terminal-line-system {
+  color: var(--fg-dimmer);
+  font-style: italic;
+}
+
+.terminal-quick-commands {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-titlebar);
+}
+
+.terminal-chip-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.terminal-chip {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--fg-dim);
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.terminal-chip:hover {
+  color: var(--fg);
+  border-color: var(--accent);
+}
+
+.terminal-chip:active {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.terminal-input-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-titlebar);
+}
+
+.terminal-prompt {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--fg-dimmer);
+  flex-shrink: 0;
+}
+
+.terminal-input-row input {
+  flex: 1;
+  background: #141414;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 7px 10px;
+  color: var(--fg);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.terminal-input-row input:focus {
+  outline: none;
+  border-color: var(--fg-dim);
+}
+
+.terminal-input-row button {
+  flex-shrink: 0;
+  padding: 7px 14px;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--fg-dim);
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.terminal-input-row button:hover {
+  color: var(--fg);
+  border-color: var(--fg-dim);
+}
+
+.terminal-input-row button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #111;
+  font-weight: 600;
+}
+
+.terminal-input-row button.primary:hover {
+  background: #ffffff;
+}
+
+.terminal-input-row button#terminal-stop-btn {
+  border-color: #e06c75;
+  color: #e06c75;
+}
+
+.terminal-input-row button#terminal-stop-btn:hover {
+  background: rgba(224, 108, 117, 0.1);
+}
+
+/* ---- Botón "+Comandos" en la esquina de la fila de comandos rápidos ---- */
+.terminal-reference-btn {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--fg-dim);
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+/* Fila del campo "Opciones" en el panel de Preajustes: input + botón +Comandos */
+.preset-options-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.preset-options-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+.terminal-reference-btn:hover {
+  color: var(--fg);
+  border-color: var(--accent);
+}
+
+/* ---- Panel de Referencia de comandos ---- */
+.terminal-reference-panel {
+  width: 640px;
+  height: 560px;
+}
+
+.terminal-reference-search-row {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.terminal-reference-search-row input {
+  width: 100%;
+  background: #141414;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 7px 10px;
+  color: var(--fg);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.terminal-reference-search-row input:focus {
+  outline: none;
+  border-color: var(--fg-dim);
+}
+
+.terminal-reference-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+
+.terminal-reference-category {
+  padding: 10px 16px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--fg-dimmer);
+}
+
+.terminal-reference-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 16px;
+  cursor: pointer;
+  border-left: 2px solid transparent;
+}
+
+.terminal-reference-row:hover {
+  background: rgba(255, 255, 255, 0.04);
+  border-left-color: var(--accent);
+}
+
+.terminal-reference-row-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.terminal-reference-cmd {
+  display: block;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--accent);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  user-select: text;
+}
+
+.terminal-reference-desc {
+  display: block;
+  font-size: 11px;
+  color: var(--fg-dim);
+  margin-top: 2px;
+  user-select: text;
+}
+
+.terminal-reference-use-btn {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--fg-dim);
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.terminal-reference-use-btn:hover {
+  color: #111;
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.terminal-reference-copied {
+  color: var(--accent) !important;
+}
+
+.terminal-reference-empty {
+  padding: 24px 16px;
+  text-align: center;
+  color: var(--fg-dimmer);
+  font-size: 12px;
+}
+
+.terminal-reference-hint {
+  padding: 8px 16px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--fg-dimmer);
+  text-align: center;
 }
