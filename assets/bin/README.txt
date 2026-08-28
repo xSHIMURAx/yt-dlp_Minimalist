@@ -1,18 +1,18 @@
-Poné acá los 3 binarios de Windows antes de correr "npm run dist".
-electron-builder los empaqueta dentro del .exe (ver "extraResources" en package.json).
+Place the 3 Windows binaries here before running “npm run dist”.
+electron-builder bundles them into the .exe (see “extraResources” in package.json).
 
 1. yt-dlp.exe
    https://github.com/yt-dlp/yt-dlp/releases
-   (bajá "yt-dlp.exe" del último release)
+   (Download “yt-dlp.exe” from the latest release)
 
 2. ffmpeg.exe
-   https://www.gyan.dev/ffmpeg/builds/  -> "release essentials"
-   Es un .zip: adentro está en la carpeta bin/. Sacá solo ffmpeg.exe
-   (no hace falta ffplay.exe ni ffprobe.exe, la app no los usa).
+   https://www.gyan.dev/ffmpeg/builds/  -> “release essentials”
+   It’s a .zip file: inside, it’s in the bin/ folder. Extract only ffmpeg.exe
+   (you don’t need ffplay.exe or ffprobe.exe; the app doesn’t use them).
 
 3. deno.exe
    https://github.com/denoland/deno/releases
-   Bajá "deno-x86_64-pc-windows-msvc.zip" del último release y sacá deno.exe.
+   Download “deno-x86_64-pc-windows-msvc.zip” from the latest release and extract deno.exe.
 
-Este archivo (LEEME.txt) no se empaqueta con la app, es solo una nota para vos.
-Podés borrarlo o dejarlo, da igual.
+This file (README.txt) isn’t included with the app; it’s just a note for you.
+You can delete it or leave it—it doesn’t matter.
