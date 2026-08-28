@@ -1,117 +1,152 @@
 # YT-DLP Minimalist
 
-![Main View](screenshots/Principal.gif)
+<p align="center">
+  <img src="screenshots/Principal.gif" alt="YT-DLP Minimalist — main view" width="800">
+</p>
 
-## A minimalist desktop interface for yt-dlp, built with Electron, that downloads videos, audio, and entire playlists from YouTube, and supports multiple platforms.
+<p align="center">
+  <img alt="Platform" src="https://img.shields.io/badge/platform-Windows%2010%2F11-0078D6?logo=windows&logoColor=white">
+  <img alt="Version" src="https://img.shields.io/badge/version-1.0.0-brightgreen">
+  <img alt="License" src="https://img.shields.io/badge/license-MIT-blue">
+  <img alt="Built with Electron" src="https://img.shields.io/badge/built%20with-Electron-47848F?logo=electron&logoColor=white">
+  <a href="https://www.virustotal.com/gui/file/7c7fc13230e9f467810dba4b27239d1f248e36d2f8888a00b710703aaefac938?nocache=1">
+    <img alt="VirusTotal" src="https://img.shields.io/badge/VirusTotal-0%2F67%20detections-success?logo=virustotal&logoColor=white">
+  </a>
+</p>
+
+<p align="center">
+  A minimalist, terminal-styled desktop interface for <a href="https://github.com/yt-dlp/yt-dlp"><code>yt-dlp</code></a>, built with Electron.
+  Download videos, audio, and entire playlists from YouTube and hundreds of other sites — no command line required.
+</p>
+
+<p align="center">
+  <a href="#downloads"><b>Download</b></a> ·
+  <a href="#features"><b>Features</b></a> ·
+  <a href="#screenshots">Screenshots</a> ·
+  <a href="#browser-extension">Browser Extension</a> ·
+  <a href="#building-from-source">Build from source</a> ·
+  <a href="#faq">FAQ</a>
+</p>
+
+---
+
+## Features
+
+- 🎬 **Video, audio, or full playlists** — pick the format and quality you want, per download or by preset.
+- 🖥️ **Terminal-style UI** — a clean, minimalist interface with a live terminal mode for the curious.
+- 🧩 **Companion browser extension** — send the current tab straight to the app, no copy-pasting URLs.
+- 🍪 **Cookie support** — download age-restricted or private content you have access to.
+- ⚙️ **Presets** — save your favorite format/quality combinations for one-click downloads.
+- 🔄 **Automatic binary updates** — `yt-dlp`, `ffmpeg`, and Deno stay up to date on their own.
+- 📦 **Portable or installer** — use it however you prefer, no forced installation.
+- 🔒 **100% local** — everything runs on your machine; nothing is uploaded anywhere.
 
 ## Downloads
 
-YT-DLP Minimalist Setup 1.0.0.exe — installer (recommended for most users)
+| File | Description |
+|---|---|
+| **YT-DLP Minimalist Setup 1.0.0.exe** | Installer — recommended for most users |
+| **YT-DLP Minimalist 1.0.0 Portable.exe** | Portable version — no installation required |
 
-YT-DLP Minimalist 1.0.0 Portable.exe — Portable version; no installation required.
+### Requirements
 
-## Requirements
-Windows 10/11 (64 bits)
+Windows 10/11 (64-bit)
 
 ## Security
 
 Both files were scanned on VirusTotal and came back clean:
 
 - Installer: 0/67 detections — [View results](https://www.virustotal.com/gui/file/7c7fc13230e9f467810dba4b27239d1f248e36d2f8888a00b710703aaefac938?nocache=1)
-- 
-- Portable: 0/68 detections — [View result](https://www.virustotal.com/gui/file/b1e4bf9280d458caed235fc657ad3994fb567bed330fa2503becf0dfe961d3c8?nocache=1)
+- Portable: 0/68 detections — [View results](https://www.virustotal.com/gui/file/b1e4bf9280d458caed235fc657ad3994fb567bed330fa2503becf0dfe961d3c8?nocache=1)
 
+## Screenshots
 
-## Screenshots of the program
+<details>
+<summary><b>Click to expand</b></summary>
+
+<br>
 
 **Video Information and Quality Selection**
-
 ![Video Information](screenshots/01.png)
 
 **Downloading Complete Playlists**
-
 ![Download Playlist](screenshots/02.png)
 
 **Downloads in progress**
-
 ![Downloads in progress](screenshots/03.png)
 
 **General Settings**
-
 ![General Settings](screenshots/04.png)
 
 **Download Settings**
-
 ![Download Settings](screenshots/05.png)
 
 **Cookies**
-
 ![Cookies](screenshots/06.png)
 
 **Presets**
-
 ![Presets](screenshots/07.png)
 
 **Terminal mode**
-
 ![Terminal](screenshots/08.png)
 
 **Updates Panel**
-
 ![Updates Panel](screenshots/09.png)
 
-**“About”**
-
+**About**
 ![About](screenshots/10.png)
+
+</details>
 
 ## Browser Extension
 
-![extension](screenshots/extension-01.png)
+<p align="center">
+  <img src="screenshots/extension-01.png" alt="Browser extension popup" width="400">
+  <img src="screenshots/extension-02.png" alt="Browser extension in use" width="400">
+</p>
 
-![extension](screenshots/extension-02.png)
-
-A companion browser extension (Chrome/Edge and other Chromium-based
-browsers) lives in the [`extension/`](./extension) folder. It sends the
-current tab's URL straight to YT-DLP Minimalist so you can queue a download
-without copying and pasting the link — the app must be running to receive it,
-and everything stays local (`127.0.0.1`, nothing leaves your computer).
+A companion browser extension (Chrome, Edge, and other Chromium-based browsers) lives in the
+[`extension/`](./extension) folder. It sends the current tab's URL straight to YT-DLP Minimalist
+so you can queue a download without copying and pasting the link — the app must be running to
+receive it, and everything stays local (`127.0.0.1`, nothing leaves your computer).
 
 See [`extension/README.md`](./extension/README.md) for installation steps.
 
-## Requirements for compiling it yourself
+## Building from source
 
-- [Node.js](https://nodejs.org) 18 or older
+### Requirements
 
-## Development (test the app without packaging it)
+- [Node.js](https://nodejs.org) 18 or newer
+
+### Run in development
 
 ```bash
 npm install
 npm start
 ```
 
-## Generate the .exe file
+### Build the .exe
 
 ```bash
 npm run dist
 ```
 
-This uses `electron-builder` and generates an installer `.exe` (NSIS) and a
-portable version at `dist/`.
+This uses `electron-builder` and generates an installer `.exe` (NSIS) and a portable version
+inside `dist/`.
 
-### Incluir yt-dlp, ffmpeg y Deno dentro del .exe (recomendado)
+### Bundle yt-dlp, ffmpeg, and Deno into the .exe (recommended)
 
 The three binaries are packaged the same way, from the same folder:
 
-1. Download `yt-dlp.exe` from https://github.com/yt-dlp/yt-dlp/releases
-2. Download `ffmpeg.exe` from https://www.gyan.dev/ffmpeg/builds/ (build
-   "release essentials"; el `.zip` includes several `.exe` in `bin/`, just
-   needs `ffmpeg.exe`)
-3. Download `deno.exe` from https://github.com/denoland/deno/releases
+1. Download `yt-dlp.exe` from the [yt-dlp releases page](https://github.com/yt-dlp/yt-dlp/releases)
+2. Download `ffmpeg.exe` from [gyan.dev builds](https://www.gyan.dev/ffmpeg/builds/) — the
+   "release essentials" build; the `.zip` includes several `.exe` files in `bin/`, you only
+   need `ffmpeg.exe`
+3. Download `deno.exe` from the [Deno releases page](https://github.com/denoland/deno/releases)
    (`deno-x86_64-pc-windows-msvc.zip`)
 4. Place all three in `assets/bin/` (`yt-dlp.exe`, `ffmpeg.exe`, `deno.exe`)
 
-The `build` from `package.json` already has `extraResources` pointing to that
-folder:
+`package.json` already points `extraResources` at that folder:
 
 ```json
 "extraResources": [
@@ -119,14 +154,13 @@ folder:
 ]
 ```
 
-If a binary isn't in `assets/bin`, the app doesn't crash: it still downloads it
-automatically to its configuration folder (`userData/bin`) the first time it's
-needed, just like before. Bundling them simply avoids that initial download and allows
-the app to work offline from the very first launch—in exchange, the
-installer is significantly larger. You can also force a re-download or
-update of any of the three from Settings → Updates.
+If a binary is missing from `assets/bin`, the app won't crash — it downloads it automatically
+to its config folder (`userData/bin`) the first time it's needed, just like before. Bundling
+them simply skips that first download and lets the app work offline from the very first
+launch, in exchange for a larger installer. You can also force a re-download or update of any
+of the three from **Settings → Updates**.
 
-## Structure
+## Project structure
 
 ```
 yt-dlp-interface/
@@ -147,11 +181,39 @@ yt-dlp-interface/
 └── assets/
 ```
 
+## FAQ
+
+**Is this safe to use?**
+Yes — both the installer and the portable build are scanned on every release and come back
+clean on VirusTotal (see [Security](#security)). The app runs entirely on your machine; it
+doesn't send any data anywhere.
+
+**Does it work on Mac or Linux?**
+Not yet — the current build targets Windows 10/11 only.
+
+**Can the browser extension work in Firefox?**
+It's built and tested for Chromium-based browsers (Chrome, Edge, Brave, Opera, Vivaldi). It may
+work in Firefox with minor changes, but this isn't officially supported yet.
+
+**Why does downloading fail for some links?**
+`yt-dlp` support depends on the site. Update the bundled binaries from **Settings → Updates** —
+most failures are fixed by grabbing the latest `yt-dlp` build.
+
+## Contributing
+
+Issues and pull requests are welcome! If you run into a bug or have an idea for a feature,
+please [open an issue](../../issues).
+
 ## License and Credits
 
-Based on the design of [yoinks](https://github.com/pablostanley/yoinks)
-by Pablo Stanley, published under the MIT license.
+Based on the design of [yoinks](https://github.com/pablostanley/yoinks) by Pablo Stanley,
+published under the MIT license.
 
-**Fair Use Note:** Downloading content may violate the terms of
-service of some platforms—download only what you have the right to
-save.
+**Fair Use Note:** Downloading content may violate the terms of service of some platforms —
+download only what you have the right to save.
+
+---
+
+<p align="center">
+  <sub>Questions or feedback? <a href="https://t.me/xSHIMURAx">t.me/xSHIMURAx</a></sub>
+</p>
