@@ -52,13 +52,17 @@ Both files were scanned on VirusTotal and came back clean:
 
 ![Presets](screenshots/07.png)
 
+**Terminal mode**
+
+![Terminal](screenshots/08.png)
+
 **Updates Panel**
 
-![Updates Panel](screenshots/08.png)
+![Updates Panel](screenshots/09.png)
 
 **“About”**
 
-![About](screenshots/09.png)
+![About](screenshots/10.png)
 
 ## Requirements for compiling it yourself
 
