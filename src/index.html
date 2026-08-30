@@ -63,7 +63,6 @@
           />
           <button id="paste-url-btn" data-i18n-title="tt_paste" title="Pegar del portapapeles" class="action-btn paste-btn" data-i18n="btn_paste">pegar</button>
           <button id="clear-url-btn" data-i18n-title="tt_clear_url" title="Borrar link" class="action-btn clear-btn hidden" data-i18n="btn_clear_url">borrar</button>
-          <button id="info-btn" data-i18n-title="tt_info" title="Ver información del video sin descargarlo" class="action-btn info-btn" data-i18n="btn_info">info</button>
           <button id="yoink-btn" data-i18n="btn_download">Descargar</button>
         </div>
       </div>
@@ -77,6 +76,94 @@
         <span class="back-arrow">&larr;</span> <span data-i18n="btn_back">volver</span>
       </button>
 
+      <div class="advanced-options-wrapper" id="advanced-options-wrapper">
+        <button type="button" class="advanced-options-btn" id="advanced-options-btn" data-i18n="advanced_options_label">Opciones avanzadas</button>
+
+        <div class="advanced-options-menu hidden" id="advanced-options-menu">
+          <div class="settings-row">
+            <label class="playlist-folder-checkbox" data-i18n-title="trim_enabled_hint" title="Ciertos archivos pueden tener errores">
+              <input type="checkbox" id="trim-enabled" />
+              <span data-i18n="trim_enabled_label">Cortar video</span>
+            </label>
+
+            <div class="trim-editor hidden" id="trim-editor">
+              <div class="trim-preview" id="trim-preview">
+                <video class="trim-preview-video hidden" id="trim-video" muted playsinline preload="metadata"></video>
+                <img class="trim-preview-poster hidden" id="trim-preview-poster" alt="" />
+                <button type="button" class="trim-preview-play hidden" id="trim-preview-play" data-i18n-title="tt_trim_play" title="Reproducir / pausar">&#9654;</button>
+                <span class="trim-preview-time hidden" id="trim-preview-time">0:00 / 0:00</span>
+              </div>
+
+              <div class="trim-range" id="trim-range">
+                <div class="trim-range-track"></div>
+                <div class="trim-range-fill" id="trim-range-fill"></div>
+                <div class="trim-range-chapters" id="trim-range-chapters"></div>
+                <div class="trim-range-handle" id="trim-handle-start" data-handle="start" tabindex="0"></div>
+                <div class="trim-range-handle" id="trim-handle-end" data-handle="end" tabindex="0"></div>
+              </div>
+
+              <div class="trim-time-row" id="trim-time-row">
+                <div class="trim-time-group">
+                  <label for="trim-start" data-i18n="trim_start_label">Desde</label>
+                  <input type="text" id="trim-start" data-i18n-placeholder="ph_trim_time" placeholder="hh:mm:ss" />
+                </div>
+                <div class="trim-time-group">
+                  <label for="trim-end" data-i18n="trim_end_label">Hasta</label>
+                  <input type="text" id="trim-end" data-i18n-placeholder="ph_trim_time" placeholder="hh:mm:ss" />
+                </div>
+              </div>
+
+              <label class="playlist-folder-checkbox trim-exact-checkbox" id="trim-exact-row" data-i18n-title="trim_exact_hint" title="Desactivado: el corte se ajusta al keyframe más cercano (puede quedar unos segundos antes de &quot;Desde&quot;), pero la descarga es mucho más rápida porque no re-codifica.">
+                <input type="checkbox" id="trim-exact-enabled" checked />
+                <span data-i18n="trim_exact_label">Corte exacto (re-codifica, más lento)</span>
+              </label>
+            </div>
+            <span class="settings-hint trim-hint-block hidden" id="trim-hint" data-i18n="trim_hint">Descarga solo ese tramo del video (hh:mm:ss, mm:ss o segundos). yt-dlp ajusta el corte al keyframe más cercano, así que puede tardar un poco más.</span>
+            <span class="settings-hint trim-hint-block hidden" id="trim-error"></span>
+          </div>
+
+          <div class="settings-row">
+            <label class="playlist-folder-checkbox">
+              <input type="checkbox" id="setting-subtitles-enabled" />
+              <span data-i18n="setting_subtitles_enabled">Subtítulos</span>
+            </label>
+            <span class="settings-hint" data-i18n="subtitles_hint">Descarga los subtítulos disponibles (o los automáticos si no hay). Solo aplica a descargas de video.</span>
+
+            <div class="settings-row settings-subrow" id="setting-subtitles-options-row">
+              <label for="setting-subtitle-langs" data-i18n="settings_row_subtitle_langs">Idiomas</label>
+              <input type="text" id="setting-subtitle-langs" data-i18n-placeholder="ph_subtitle_langs" placeholder="ej. es,en (vacío = todos)" />
+              <span class="settings-hint" data-i18n="subtitle_langs_hint">Códigos de idioma separados por coma (ej. "es", "es,en"). Dejalo vacío para descargar todos los idiomas disponibles.</span>
+            </div>
+
+            <div class="settings-row settings-subrow" id="setting-subtitle-mode-row">
+              <label for="setting-subtitle-mode" data-i18n="settings_row_subtitle_mode">Guardar como</label>
+              <select id="setting-subtitle-mode">
+                <option value="embed" data-i18n="opt_subtitle_mode_embed">Incrustados en el video</option>
+                <option value="file" data-i18n="opt_subtitle_mode_file">Archivo aparte (.srt)</option>
+                <option value="both" data-i18n="opt_subtitle_mode_both">Ambos</option>
+              </select>
+              <span class="settings-hint" data-i18n="subtitle_mode_hint">"Incrustados" los graba dentro del video (no se pueden desactivar después). "Archivo aparte" deja un .srt/.vtt junto al video, editable y desactivable en el reproductor.</span>
+            </div>
+          </div>
+
+          <div class="settings-row">
+            <label class="playlist-folder-checkbox">
+              <input type="checkbox" id="setting-thumbnails-enabled" checked />
+              <span data-i18n="setting_thumbnails_enabled">Miniaturas</span>
+            </label>
+            <span class="settings-hint" data-i18n="thumbnails_hint">Incrusta la miniatura del video como carátula del archivo descargado.</span>
+          </div>
+
+          <div class="settings-row">
+            <label class="playlist-folder-checkbox">
+              <input type="checkbox" id="setting-chapters-enabled" />
+              <span data-i18n="setting_chapters_enabled">Capítulos</span>
+            </label>
+            <span class="settings-hint" data-i18n="chapters_hint">Incrusta los capítulos del video (si el video los tiene) en el archivo descargado.</span>
+          </div>
+        </div>
+      </div>
+
       <div class="picker-layout" id="picker-layout">
         <!-- Columna izquierda: detalles del video -->
         <div class="video-meta" id="video-meta">
@@ -86,9 +173,15 @@
               <p class="video-title" id="video-title"></p>
               <p class="video-sub" id="video-sub"></p>
               <div class="video-info-stats video-meta-stats" id="video-meta-stats"></div>
+              <div class="already-downloaded-row">
+                <button type="button" class="action-btn preview-video-btn hidden" id="preview-video-btn" data-i18n-title="tt_preview_video" title="Previsualizar video">
+                  <span data-i18n="btn_preview_video">▶ Previsualizar</span>
+                </button>
+                <div class="already-downloaded-badge hidden" id="already-downloaded-badge"></div>
+              </div>
             </div>
           </div>
-          <div class="video-meta-stats-row">
+          <div class="video-meta-stats-row" id="video-meta-stats-row">
             <div class="preset-dropdown-wrapper hidden">
               <button id="preset-menu-btn" class="preset-menu-btn" data-i18n-title="tt_preset_menu" title="Seleccionar preajuste" data-i18n="btn_preset_menu">⚙ Preajuste</button>
               <div class="preset-dropdown-menu hidden" id="preset-dropdown-menu">
@@ -157,10 +250,14 @@
               <option value="audio" data-i18n="opt_quality_audio">Mejor audio disponible (MP3)</option>
               <option value="audio-m4a" data-i18n="opt_quality_audio_m4a">Solo audio (M4A)</option>
               <option value="audio-opus" data-i18n="opt_quality_audio_opus">Solo audio (OPUS)</option>
+              <option value="2160" data-i18n="opt_quality_2160">Hasta 2160p (4K)</option>
+              <option value="1440" data-i18n="opt_quality_1440">Hasta 1440p (2K)</option>
               <option value="1080" data-i18n="opt_quality_1080">Hasta 1080p</option>
               <option value="720" data-i18n="opt_quality_720">Hasta 720p</option>
               <option value="480" data-i18n="opt_quality_480">Hasta 480p</option>
               <option value="360" data-i18n="opt_quality_360">Hasta 360p</option>
+              <option value="240" data-i18n="opt_quality_240">Hasta 240p</option>
+              <option value="144" data-i18n="opt_quality_144">Hasta 144p</option>
             </select>
           </div>
         </div>
@@ -421,6 +518,7 @@
           </select>
           <span class="settings-hint" data-i18n="concurrent_hint">Cantidad de videos de una lista que se descargan al mismo tiempo</span>
         </div>
+
       </div>
 
       <div class="presets-actions">
@@ -710,6 +808,24 @@
         <button id="close-behavior-cancel-btn" data-i18n="btn_cancel">Cancelar</button>
         <button id="close-behavior-close-btn" data-i18n="btn_close_program">Cerrar</button>
         <button id="close-behavior-minimize-btn" class="primary" data-i18n="btn_minimize">Minimizar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Previsualización del video ya descargado (se abre desde "✓ Ya descargado" / "▶ Previsualizar") -->
+  <div class="presets-overlay hidden" id="preview-video-overlay">
+    <div class="preview-video-panel">
+      <div class="preview-video-header">
+        <span class="preview-video-title" id="preview-video-title"></span>
+        <button type="button" class="preview-video-close" id="preview-video-close-btn" data-i18n-title="tt_close" title="Cerrar">✕</button>
+      </div>
+      <div class="preview-video-body">
+        <video id="preview-video-el" controls autoplay></video>
+        <!-- Cuando la mejor calidad viene separada en video-only + audio-only
+             (DASH, típico de 1080p para arriba), este <audio> oculto lleva el
+             sonido en paralelo, sincronizado desde renderer.js con el <video>. -->
+        <audio id="preview-audio-el" preload="auto"></audio>
+        <p class="preview-video-error hidden" id="preview-video-error" data-i18n="preview_video_error">No se pudo reproducir el archivo (¿se movió o se borró?).</p>
       </div>
     </div>
   </div>

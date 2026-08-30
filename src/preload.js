@@ -1,4 +1,5 @@
 const { contextBridge, ipcRenderer, clipboard } = require('electron');
+const { pathToFileURL } = require('url');
 
 contextBridge.exposeInMainWorld('yoinksAPI', {
   minimize: () => ipcRenderer.send('window:minimize'),
@@ -59,6 +60,16 @@ contextBridge.exposeInMainWorld('yoinksAPI', {
   clearHistory: () => ipcRenderer.invoke('history:clear'),
   openHistoryFile: (filePath) => ipcRenderer.send('history:open-file', filePath),
   showInFolder: (filePath) => ipcRenderer.send('history:open-file', filePath),
+  // Convierte una ruta local (ej. "C:\Users\...\video.mp4") a un file:// URL
+  // válido para el src del <video> del modal de previsualización. Se hace acá
+  // (preload, con acceso a Node) porque el renderer no tiene el módulo 'url'.
+  pathToFileUrl: (filePath) => pathToFileURL(filePath).href,
+
+  // Algunos sitios (Bilibili es el caso típico) exigen un Referer/User-Agent
+  // puntual en el pedido HTTP del video/audio de la vista previa o el CDN lo
+  // rechaza, algo que un <video>/<audio> nativo no puede mandar por sí solo.
+  // El main process los inyecta por nosotros (ver 'preview:set-headers').
+  setPreviewHeaders: (entries) => ipcRenderer.invoke('preview:set-headers', entries),
 
   getSettings: () => ipcRenderer.invoke('settings:get'),
   saveSettings: (settings) => ipcRenderer.invoke('settings:save', settings),

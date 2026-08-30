@@ -365,7 +365,7 @@ html, body {
   z-index: 1;
   display: inline-block;
   font-family: var(--mono);
-  font-size: 84px;
+  font-size: 100px;
   font-weight: 600;
   letter-spacing: 1px;
   color: var(--fg);
@@ -733,9 +733,420 @@ html, body {
   color: var(--fg-dimmer);
 }
 
+/* Etiqueta que avisa que este mismo video ya se descargó antes (ver
+   checkIfAlreadyDownloaded en renderer.js), ubicada justo arriba del botón
+   "Descargar". Usa el mismo verde que el estado "success" del resto de la app. */
+.already-downloaded-badge {
+  display: inline-flex;
+  align-items: center;
+  color: #7ac97a;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.already-downloaded-badge.clickable {
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  transition: text-decoration-color 0.15s ease;
+}
+
+.already-downloaded-badge.clickable:hover {
+  text-decoration-color: #7ac97a;
+}
+
+.already-downloaded-badge.hidden {
+  display: none;
+}
+
+.already-downloaded-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.already-downloaded-row:empty,
+.already-downloaded-row.hidden {
+  display: none;
+}
+
+/* Botón "▶ Previsualizar": aparece cuando yt-dlp trae un formato reproducible
+   en streaming (ver updatePreviewVideoButton). Usa la misma apariencia que
+   los botones de acción tipo "Info" (.action-btn); acá solo se ajusta lo
+   que necesita ser distinto. */
+.preview-video-btn {
+  margin-right: 0;
+}
+
+.preview-video-btn.hidden {
+  display: none;
+}
+
+/* ---------- Modal de previsualización (reproductor dentro de la app) ---------- */
+.preview-video-panel {
+  width: 720px;
+  max-width: 92%;
+  max-height: 85%;
+  background: var(--bg-elevated, #141414);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.preview-video-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.preview-video-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.preview-video-close {
+  background: transparent;
+  border: none;
+  color: var(--fg-dimmer);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 6px;
+  flex-shrink: 0;
+}
+
+.preview-video-close:hover {
+  color: var(--fg);
+}
+
+.preview-video-body {
+  background: #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 200px;
+}
+
+.preview-video-body video {
+  width: 100%;
+  max-height: 70vh;
+  display: block;
+}
+
+.preview-video-body video.hidden {
+  display: none;
+}
+
+.preview-video-body audio {
+  /* Solo lleva el audio cuando la calidad elegida viene separada en
+     video-only + audio-only; nunca se muestra en pantalla. */
+  display: none;
+}
+
+.preview-video-error {
+  color: var(--fg-dimmer);
+  font-size: 12px;
+  padding: 30px;
+  text-align: center;
+}
+
+.preview-video-error.hidden {
+  display: none;
+}
+
 .video-meta-stats-row:not(:has(.preset-dropdown-wrapper.hidden)) {
   margin-top: 10px;
 }
+
+/* ---------- "Opciones avanzadas" (Cortar video, Subtítulos, Miniaturas, Capítulos) ----------
+   Anclado arriba a la derecha de la pantalla de formatos, a la misma altura que "volver". */
+.advanced-options-wrapper {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  z-index: 20;
+}
+
+.advanced-options-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--fg-dim);
+  cursor: pointer;
+  font-size: 11px;
+  font-family: var(--mono);
+  padding: 5px 10px;
+  border-radius: 3px;
+  transition: all 0.15s ease;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.advanced-options-btn::before {
+  content: '▸';
+  display: inline-block;
+  font-size: 9px;
+  transition: transform 0.15s ease;
+}
+
+.advanced-options-btn:hover {
+  color: var(--fg);
+  border-color: var(--fg-dim);
+}
+
+.advanced-options-btn.active {
+  color: var(--fg);
+  border-color: var(--fg);
+  background: #0a0a0a;
+}
+
+.advanced-options-btn.active::before {
+  transform: rotate(90deg);
+}
+
+.advanced-options-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  left: auto;
+  margin-top: 4px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  width: 420px;
+  min-width: 420px;
+  max-width: 90vw;
+  max-height: 80vh;
+  overflow-y: auto;
+  z-index: 500;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.55);
+  padding: 18px 20px;
+}
+
+.advanced-options-menu.hidden {
+  display: none;
+}
+
+.advanced-options-menu .settings-row {
+  margin-top: 14px;
+}
+
+.advanced-options-menu .settings-row:first-child {
+  margin-top: 0;
+}
+
+/* ---------- Editor visual de corte (preview + barra de rango arrastrable) ---------- */
+.trim-editor {
+  margin-top: 10px;
+}
+
+.trim-editor.hidden {
+  display: none;
+}
+
+.trim-exact-checkbox {
+  margin-top: 10px;
+}
+
+.trim-preview {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: #000;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.trim-preview-video,
+.trim-preview-poster {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+}
+
+.trim-preview-video.hidden,
+.trim-preview-poster.hidden {
+  display: none;
+}
+
+.trim-preview-play {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  background: rgba(0, 0, 0, 0.55);
+  color: var(--fg);
+  font-size: 13px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.trim-preview-play:hover {
+  background: rgba(0, 0, 0, 0.75);
+  border-color: var(--accent-cyan);
+}
+
+.trim-preview-play.hidden {
+  display: none;
+}
+
+.trim-preview-time {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  background: rgba(0, 0, 0, 0.65);
+  color: var(--fg);
+  font-size: 11px;
+  padding: 3px 7px;
+  border-radius: 3px;
+  pointer-events: none;
+}
+
+.trim-preview-time.hidden {
+  display: none;
+}
+
+.trim-range {
+  position: relative;
+  height: 18px;
+  margin-top: 12px;
+  cursor: pointer;
+}
+
+.trim-range-track {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 4px;
+  transform: translateY(-50%);
+  background: #262626;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+}
+
+.trim-range-fill {
+  position: absolute;
+  top: 50%;
+  height: 4px;
+  transform: translateY(-50%);
+  background: var(--accent-cyan);
+  border-radius: 3px;
+  pointer-events: none;
+}
+
+.trim-range-chapters {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.trim-chapter-mark {
+  position: absolute;
+  top: 50%;
+  width: 2px;
+  height: 10px;
+  transform: translate(-50%, -50%);
+  background: var(--bg);
+  opacity: 0.85;
+  pointer-events: auto;
+  cursor: pointer;
+  z-index: 1;
+}
+
+.trim-range-handle {
+  position: absolute;
+  top: 50%;
+  width: 14px;
+  height: 14px;
+  transform: translate(-50%, -50%);
+  background: var(--fg);
+  border: 2px solid var(--accent-cyan);
+  border-radius: 50%;
+  cursor: grab;
+  touch-action: none;
+  z-index: 2;
+}
+
+.trim-range-handle:hover,
+.trim-range-handle:focus-visible {
+  background: var(--accent-cyan);
+  outline: none;
+}
+
+.trim-range-handle:active {
+  cursor: grabbing;
+}
+
+.trim-time-row {
+  display: flex;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.trim-time-row.hidden {
+  display: none;
+}
+
+.trim-time-group {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.trim-time-group label {
+  font-size: 11px;
+  color: var(--fg-dim);
+}
+
+.trim-time-group input[type='text'] {
+  background: #141414;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 7px 8px;
+  color: var(--fg);
+  font-family: var(--mono);
+  font-size: 12px;
+  outline: none;
+  width: 100%;
+}
+
+.trim-time-group input[type='text']:focus {
+  border-color: var(--fg-dim);
+}
+
+#trim-error {
+  color: #e08a8a;
+}
+
+.trim-hint-block {
+  display: block;
+  margin-top: 6px;
+}
+
+.trim-hint-block.hidden {
+  display: none;
+}
+
 
 /* Playlist: título y contador centrados (a diferencia del video individual,
    que va alineado a la izquierda junto a la miniatura) */
@@ -979,7 +1390,7 @@ html, body {
 
 .download-columns-header {
   display: grid;
-  grid-template-columns: 12px 12px 26px 52px 68px 1fr;
+  grid-template-columns: 12px 12px 26px 68px 72px 56px 1fr;
   column-gap: 10px;
   align-items: center;
   padding: 4px 12px 6px 10px;
@@ -1007,8 +1418,15 @@ html, body {
   text-align: center;
 }
 
-.download-columns-header .col-size {
+.download-columns-header .col-codec {
   grid-column: 6;
+  padding-left: 14px;
+  border-left: 1px solid #232323;
+  text-align: center;
+}
+
+.download-columns-header .col-size {
+  grid-column: 7;
   padding-left: 14px;
   border-left: 1px solid #232323;
 }
@@ -1025,7 +1443,7 @@ html, body {
 
 .download-item:not(.preset-item) {
   display: grid;
-  grid-template-columns: 12px 12px 26px 52px 68px 1fr;
+  grid-template-columns: 12px 12px 26px 68px 72px 56px 1fr;
   column-gap: 10px;
   align-items: center;
 }
@@ -1174,11 +1592,57 @@ html, body {
   color: var(--fg);
 }
 
+/* Celda de códec: mismo look que .ext-select (select nativo, subrayado al
+   pasar el cursor), pero fuente un poco más chica ya que las etiquetas
+   ("H264", "AV1", "VP9"...) son más largas que "MP4"/"MKV". El texto fijo
+   (.codec-static, cuando solo hay un códec detectado) usa el mismo tamaño
+   y color apagado para que ambas variantes se vean parejas en la columna. */
+.download-item .codec-select {
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+  border: none;
+  padding: 0 0 0 8px;
+  margin: 0;
+  border-left: 1px solid #232323;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  text-align: center;
+  text-align-last: center;
+  text-transform: uppercase;
+  cursor: pointer;
+  outline: none;
+  width: 100%;
+  text-decoration: underline dashed transparent;
+  text-underline-offset: 3px;
+  transition: color 0.15s ease, text-decoration-color 0.15s ease;
+}
+
+.download-item .codec-select:hover,
+.download-item .codec-select:focus {
+  color: var(--accent-cyan);
+  text-decoration-color: currentColor;
+}
+
+.download-item .codec-select option {
+  background: #141414;
+  color: var(--fg);
+}
+
+.download-item .codec-static {
+  padding-left: 8px;
+  border-left: 1px solid #232323;
+  font-size: 12px;
+  text-align: center;
+  color: var(--fg-dimmer);
+}
+
 .download-item .size {
   color: var(--fg-dimmer);
   padding-left: 14px;
   border-left: 1px solid #232323;
-  width: 130px;
+  width: 100px;
 }
 
 .download-item.preset-item .res {
@@ -1237,6 +1701,21 @@ html, body {
   margin-top: 10px;
   padding-top: 10px;
   border-top: 1px solid #2a2a2a;
+}
+
+/* Sub-separador "Audio" dentro de "Formatos detectados": marca el corte
+   entre las filas de resolución de video y las de solo-audio. Más sutil
+   que .download-divider-section (esa separa Preajuste de Formatos
+   detectados), acá solo una línea fina + label chico alineado a la izq. */
+.download-subdivider {
+  padding: 6px 12px 3px;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-align: left;
+  color: var(--fg-dimmer);
+  border-top: 1px dashed #232323;
+  margin-top: 4px;
 }
 
 .download-item.selected {
@@ -1483,6 +1962,7 @@ html, body {
 /* ---------- Botón "Descargar" de la pantalla de formatos ---------- */
 .picker-actions {
   margin-top: 14px;
+  text-align: center;
 }
 
 .picker-actions button.primary {
@@ -2053,6 +2533,22 @@ kbd {
   border-color: var(--text-accent);
 }
 
+/* Etiqueta que reemplaza al botón "eliminar" en las dos entradas "builtin"
+   (Mejor video y audio / Mejor audio disponible): se pueden editar pero no
+   borrar, así que en vez de un botón muestran este texto fijo. */
+.preset-locked {
+  display: inline-block;
+  border: 1px solid transparent;
+  color: var(--fg-dimmer);
+  opacity: 0.6;
+  border-radius: 3px;
+  padding: 2px 7px;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-style: italic;
+  cursor: default;
+}
+
 .presets-form {
   display: grid;
   grid-template-columns: 1fr 1.4fr 2fr;
@@ -2272,6 +2768,28 @@ kbd {
   width: 0%;
   background: var(--accent);
   transition: width 0.15s ease;
+}
+
+/* Recorte de video ("Cortar video"): mientras yt-dlp re-codifica con ffmpeg
+   para el corte exacto (--force-keyframes-at-cuts) no reporta un % real, así
+   que en vez de dejar la barra clavada en 0% (parece colgada) se muestra un
+   patrón animado indicando que está trabajando pero sin progreso medible. */
+.update-progress-fill.indeterminate {
+  width: 100% !important;
+  background: repeating-linear-gradient(
+    45deg,
+    var(--accent) 0px,
+    var(--accent) 10px,
+    transparent 10px,
+    transparent 20px
+  );
+  background-size: 28px 28px;
+  animation: update-progress-indeterminate-scroll 1s linear infinite;
+}
+
+@keyframes update-progress-indeterminate-scroll {
+  from { background-position: 0 0; }
+  to { background-position: 28px 0; }
 }
 
 .update-progress-text {

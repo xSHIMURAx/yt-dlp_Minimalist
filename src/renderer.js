@@ -57,6 +57,13 @@ function applyLanguage(lang) {
     if (typeof videoInfoStatsEl !== 'undefined' && videoInfoStatsEl) renderStatsPills(videoInfoStatsEl, currentVideoInfo);
   }
 
+  // Etiqueta "Ya descargado": el texto y el formato de fecha dependen del
+  // idioma activo, así que se vuelve a pintar (sin volver a pedir el
+  // historial) cada vez que el usuario cambia de idioma.
+  if (typeof renderAlreadyDownloadedBadge === 'function') {
+    renderAlreadyDownloadedBadge();
+  }
+
   // La tabla de presets (panel ⚙) tiene el mismo problema cuando está vacía:
   // el "Sin presets todavía." se escribe una sola vez como texto plano y no
   // se retraduce solo. Cuando SÍ hay presets, cada fila ya usa data-i18n /
@@ -131,10 +138,59 @@ const videoThumbEl = document.getElementById('video-thumb');
 const videoTitleEl = document.getElementById('video-title');
 const videoSubEl = document.getElementById('video-sub');
 const videoMetaStatsEl = document.getElementById('video-meta-stats');
+const trimEnabledCheckbox = document.getElementById('trim-enabled');
+const trimExactCheckbox = document.getElementById('trim-exact-enabled');
+const trimEditorEl = document.getElementById('trim-editor');
+const trimTimeRow = document.getElementById('trim-time-row');
+const trimStartInput = document.getElementById('trim-start');
+const trimEndInput = document.getElementById('trim-end');
+const trimHintEl = document.getElementById('trim-hint');
+const trimErrorEl = document.getElementById('trim-error');
+const trimVideoEl = document.getElementById('trim-video');
+const trimPosterEl = document.getElementById('trim-preview-poster');
+const trimPlayBtn = document.getElementById('trim-preview-play');
+const trimTimeLabelEl = document.getElementById('trim-preview-time');
+const trimRangeEl = document.getElementById('trim-range');
+const trimRangeFillEl = document.getElementById('trim-range-fill');
+const trimHandleStartEl = document.getElementById('trim-handle-start');
+const trimHandleEndEl = document.getElementById('trim-handle-end');
+const trimRangeChaptersEl = document.getElementById('trim-range-chapters');
+const alreadyDownloadedBadgeEl = document.getElementById('already-downloaded-badge');
+const previewVideoBtn = document.getElementById('preview-video-btn');
+const previewVideoOverlayEl = document.getElementById('preview-video-overlay');
+const previewVideoElEl = document.getElementById('preview-video-el');
+const previewAudioEl = document.getElementById('preview-audio-el');
+const previewVideoTitleEl = document.getElementById('preview-video-title');
+const previewVideoErrorEl = document.getElementById('preview-video-error');
+const previewVideoCloseBtn = document.getElementById('preview-video-close-btn');
 const downloadFrameEl = document.getElementById('download-frame');
 const downloadListEl = document.getElementById('download-list');
 let downloadListInner = downloadListEl;
 const pickerDownloadBtn = document.getElementById('picker-download-btn');
+
+// ---- Menú flotante de "Opciones avanzadas" (Cortar video, Subtítulos, Miniaturas, Capítulos) ----
+const advancedOptionsBtn = document.getElementById('advanced-options-btn');
+const advancedOptionsMenu = document.getElementById('advanced-options-menu');
+
+if (advancedOptionsBtn && advancedOptionsMenu) {
+  advancedOptionsBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const isHidden = advancedOptionsMenu.classList.contains('hidden');
+    advancedOptionsMenu.classList.toggle('hidden');
+    advancedOptionsBtn.classList.toggle('active', isHidden);
+    if (!isHidden) releaseTrimVideoStream(); // se está cerrando: soltar la conexión de la preview
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!advancedOptionsBtn.contains(e.target) && !advancedOptionsMenu.contains(e.target)) {
+      const wasOpen = !advancedOptionsMenu.classList.contains('hidden');
+      advancedOptionsMenu.classList.add('hidden');
+      advancedOptionsBtn.classList.remove('active');
+      if (wasOpen) releaseTrimVideoStream();
+    }
+  });
+}
+
 
 // ---- Dropdown de Preajustes en Download Frame ----
 const presetMenuBtn = document.getElementById('preset-menu-btn');
@@ -144,7 +200,6 @@ let selectedPresetForDownload = null; // índice del preajuste seleccionado para
 const backBtn = document.getElementById('back-btn');
 
 // ---- Panel de Información del Video (consulta sin descargar) ----
-const infoBtn = document.getElementById('info-btn');
 const videoInfoOverlay = document.getElementById('video-info-overlay');
 const videoInfoCloseBtn = document.getElementById('video-info-close-btn');
 const videoInfoThumbEl = document.getElementById('video-info-thumb');
@@ -290,6 +345,13 @@ const settingLoginStatusEl = document.getElementById('setting-login-status');
 const settingRateLimitInput = document.getElementById('setting-rate-limit');
 const settingRateLimitModeSelect = document.getElementById('setting-rate-limit-mode');
 const settingConcurrentDownloadsSelect = document.getElementById('setting-concurrent-downloads');
+const settingSubtitlesEnabledCheckbox = document.getElementById('setting-subtitles-enabled');
+const settingSubtitleLangsInput = document.getElementById('setting-subtitle-langs');
+const settingSubtitleModeSelect = document.getElementById('setting-subtitle-mode');
+const settingSubtitlesOptionsRow = document.getElementById('setting-subtitles-options-row');
+const settingSubtitleModeRow = document.getElementById('setting-subtitle-mode-row');
+const settingThumbnailsEnabledCheckbox = document.getElementById('setting-thumbnails-enabled');
+const settingChaptersEnabledCheckbox = document.getElementById('setting-chapters-enabled');
 const settingSoundEnabledCheckbox = document.getElementById('setting-sound-enabled');
 const settingSoundStyleSelect = document.getElementById('setting-sound-style');
 const settingCloseBehaviorSelect = document.getElementById('setting-close-behavior');
@@ -616,7 +678,9 @@ async function handleYoink() {
         setStatus(window.i18n.t('no_response_retrying', { attempt, total }), 'loading', 'home'),
     });
     currentVideoInfo = info;
+    await checkIfAlreadyDownloaded(info, url);
     renderVideoMeta(info);
+    resetTrimSection();
     buildDownloadOptions(info);
     renderDownloadList();
     setStatus('', '', 'home');
@@ -639,6 +703,471 @@ function formatDuration(seconds) {
   return `${m}:${s}`;
 }
 
+// ================= "CORTAR VIDEO" (picker de un solo video) =================
+// Convierte "hh:mm:ss" / "mm:ss" / "ss" a segundos. Devuelve null si el
+// formato no matchea (dígitos y ":" nada más, 1 a 3 grupos).
+function parseTimeToSeconds(value) {
+  const str = (value || '').trim();
+  if (!str) return null;
+  if (!/^\d{1,}(:\d{1,2}){0,2}$/.test(str)) return null;
+  const parts = str.split(':').map((p) => parseInt(p, 10));
+  if (parts.some((p) => !Number.isFinite(p) || p < 0)) return null;
+  // Los segundos/minutos "de más" (ej. "90" en mm:ss) son válidos para
+  // yt-dlp, así que no los rechazamos, solo sumamos por posición.
+  let seconds = 0;
+  for (const p of parts) seconds = seconds * 60 + p;
+  return seconds;
+}
+
+// Formatea segundos a "hh:mm:ss" (el formato que espera --download-sections)
+function secondsToTimestamp(totalSeconds) {
+  const s = Math.max(0, Math.round(totalSeconds));
+  const hh = Math.floor(s / 3600);
+  const mm = Math.floor((s % 3600) / 60);
+  const ss = s % 60;
+  return [hh, mm, ss].map((n) => String(n).padStart(2, '0')).join(':');
+}
+
+function resetTrimSection() {
+  trimEnabledCheckbox.checked = false;
+  trimStartInput.value = '';
+  trimEndInput.value = '';
+  trimExactCheckbox.checked = true; // por defecto, corte exacto (comportamiento de siempre)
+  updateTrimRowsVisibility();
+  setTrimError('');
+  resetTrimPreview(); // el video cambió: soltamos el <video> anterior y lo re-armamos recién si lo abren
+}
+
+function updateTrimRowsVisibility() {
+  const enabled = trimEnabledCheckbox.checked;
+  trimEditorEl.classList.toggle('hidden', !enabled);
+  trimHintEl.classList.toggle('hidden', !enabled);
+  if (!enabled) {
+    setTrimError('');
+    pauseTrimPreview();
+  } else {
+    initTrimPreview(); // carga perezosa: recién arma el preview la primera vez que se activa
+  }
+}
+
+function setTrimError(message) {
+  trimErrorEl.textContent = message || '';
+  trimErrorEl.classList.toggle('hidden', !message);
+}
+
+trimEnabledCheckbox.addEventListener('change', updateTrimRowsVisibility);
+
+// ---- Editor visual de corte: preview del video + barra de rango arrastrable ----
+// (ver captura de referencia: video arriba, barra con dos manijas abajo, y
+// los mismos inputs "Desde"/"Hasta" de siempre sincronizados con la barra)
+let trimDuration = 0; // duración total del video en segundos (info.duration, o video.duration si el primero no vino)
+let trimRangeStart = 0;
+let trimRangeEnd = 0;
+let trimActiveHandle = null; // 'start' | 'end' mientras se arrastra una manija
+let trimPreviewInitialized = false; // evita re-armar el <video> cada vez que se destilda/tilda el checkbox
+
+// yt-dlp trae, dentro de "formats", varios con "url" directa http/https que
+// un <video>/<audio> nativo puede reproducir sin librerías extra (una fuente
+// HLS/DASH tipo m3u8/mpd no serviría acá). El detalle es que la mayoría de
+// los sitios (YouTube incluido) NO traen progresivo (video+audio en un solo
+// archivo) arriba de 720p: todo lo de 1080p para arriba viene separado en
+// un formato solo-video + uno solo-audio (DASH). Por eso hay dos funciones:
+// una para el editor de "Cortar" (el <video> ahí va silenciado, así que
+// no importa si el formato trae audio) y otra para el modal "▶
+// Previsualizar" (necesita audio, así que arma la mejor combinación
+// video-only + audio-only cuando eso da más calidad que el mejor progresivo).
+
+const PREVIEW_MAX_HEIGHT = 720; // tope para no pedir un stream pesado solo para una vista previa
+
+function isPlayableStreamProtocol(f) {
+  return !!(f && f.url && (!f.protocol || f.protocol === 'https' || f.protocol === 'http'));
+}
+// avc1/h264, vp9 y av01 son los códecs de video que Chromium reproduce
+// nativamente; mp4a/aac y opus, los de audio.
+function isPlayableVideoCodec(vcodec) {
+  return !!vcodec && /^(avc1|h264|vp0?9|av01)/i.test(vcodec);
+}
+function isPlayableAudioCodec(acodec) {
+  return !!acodec && /^(mp4a|aac|opus)/i.test(acodec);
+}
+
+// Entre los formatos candidatos, el de mayor resolución sin pasarse del
+// tope; si ninguno entra en el tope (ej. el video solo viene en 4K+), nos
+// quedamos con el más liviano de los que hay en vez de pedir un stream
+// gigante para una vista previa.
+function pickBestByHeight(formats) {
+  if (!formats.length) return null;
+  const withinCap = formats.filter((f) => !f.height || f.height <= PREVIEW_MAX_HEIGHT);
+  if (withinCap.length) return withinCap.sort((a, b) => (b.height || 0) - (a.height || 0))[0];
+  return formats.sort((a, b) => (a.height || 9e9) - (b.height || 9e9))[0];
+}
+
+function pickBestAudio(formats) {
+  if (!formats.length) return null;
+  return formats.sort((a, b) => (b.abr || 0) - (a.abr || 0))[0];
+}
+
+// Le avisa al proceso principal qué headers exactos necesita el pedido HTTP
+// de esta URL (ver 'preview:set-headers' en main.js). Algunos sitios
+// (Bilibili es el caso típico) firman el link del video/audio, pero además
+// el CDN exige un Referer/User-Agent puntual en el pedido o devuelve 403 —
+// sin importar que la URL en sí sea válida y aunque haya cookies cargadas.
+// yt-dlp ya sabe qué headers hacen falta para cada formato (los trae en
+// "http_headers" dentro del JSON de "-J"), pero un <video>/<audio> nativo no
+// tiene forma de mandar headers custom en su propio pedido: por eso el main
+// process los inyecta por nosotros justo antes de que salga la petición.
+function registerPreviewHeaders(url, httpHeaders) {
+  if (!url || !httpHeaders || typeof httpHeaders !== 'object') return;
+  const headers = {};
+  Object.keys(httpHeaders).forEach((key) => {
+    const value = httpHeaders[key];
+    if (typeof value === 'string' && value) headers[key] = value;
+  });
+  if (!Object.keys(headers).length) return;
+  if (window.yoinksAPI && window.yoinksAPI.setPreviewHeaders) {
+    window.yoinksAPI.setPreviewHeaders([{ url, headers }]);
+  }
+}
+
+// Editor de "Cortar": el <video> va silenciado (ver atributo "muted" en el
+// HTML), así que da igual si el formato elegido trae audio o no; solo
+// buscamos la mejor imagen disponible.
+function pickPreviewFormatUrl(info) {
+  if (!info || !Array.isArray(info.formats)) return null;
+  const videoCandidates = info.formats.filter(
+    (f) => isPlayableStreamProtocol(f) && f.vcodec && f.vcodec !== 'none' && isPlayableVideoCodec(f.vcodec)
+  );
+  const best = pickBestByHeight(videoCandidates);
+  if (!best) return null;
+  registerPreviewHeaders(best.url, best.http_headers);
+  return best.url;
+}
+
+// Modal "▶ Previsualizar": acá sí hace falta escuchar el audio. Devuelve
+// { videoUrl, audioUrl, height }. audioUrl viene null cuando el video
+// elegido ya trae el audio incluido (formato progresivo).
+function pickPreviewSource(info) {
+  if (!info || !Array.isArray(info.formats)) return null;
+  const hasVideo = (f) => f.vcodec && f.vcodec !== 'none' && isPlayableVideoCodec(f.vcodec);
+  const hasAudio = (f) => f.acodec && f.acodec !== 'none' && isPlayableAudioCodec(f.acodec);
+  const candidates = info.formats.filter(isPlayableStreamProtocol);
+
+  const progressive = candidates.filter((f) => hasVideo(f) && hasAudio(f));
+  const videoOnly = candidates.filter((f) => hasVideo(f) && !hasAudio(f));
+  const audioOnly = candidates.filter((f) => !hasVideo(f) && hasAudio(f));
+
+  const bestProgressive = pickBestByHeight(progressive);
+  const bestVideoOnly = pickBestByHeight(videoOnly);
+  const bestAudio = pickBestAudio(audioOnly);
+
+  // Preferimos la combinación video-only + audio-only si nos da mejor
+  // resolución que el mejor progresivo disponible (el caso típico: sin
+  // esto, la vista previa quedaba pegada a los ~360-720p del progresivo).
+  if (bestVideoOnly && bestAudio && (bestVideoOnly.height || 0) > (bestProgressive ? bestProgressive.height || 0 : 0)) {
+    registerPreviewHeaders(bestVideoOnly.url, bestVideoOnly.http_headers);
+    registerPreviewHeaders(bestAudio.url, bestAudio.http_headers);
+    return { videoUrl: bestVideoOnly.url, audioUrl: bestAudio.url, height: bestVideoOnly.height || null };
+  }
+  if (bestProgressive) {
+    registerPreviewHeaders(bestProgressive.url, bestProgressive.http_headers);
+    return { videoUrl: bestProgressive.url, audioUrl: null, height: bestProgressive.height || null };
+  }
+  if (bestVideoOnly) {
+    // No hay pista de audio disponible: mejor mostrar la imagen sin sonido
+    // que no mostrar nada.
+    registerPreviewHeaders(bestVideoOnly.url, bestVideoOnly.http_headers);
+    return { videoUrl: bestVideoOnly.url, audioUrl: null, height: bestVideoOnly.height || null };
+  }
+  return null;
+}
+
+function formatClock(seconds) {
+  if (!Number.isFinite(seconds) || seconds < 0) seconds = 0;
+  const total = Math.floor(seconds);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = (total % 60).toString().padStart(2, '0');
+  return h > 0 ? `${h}:${m.toString().padStart(2, '0')}:${s}` : `${m}:${s}`;
+}
+
+function initTrimPreview() {
+  if (trimPreviewInitialized) return;
+  trimPreviewInitialized = true;
+
+  trimDuration = (currentVideoInfo && currentVideoInfo.duration) || 0;
+  trimRangeStart = 0;
+  trimRangeEnd = trimDuration || 0;
+
+  const posterUrl = currentVideoInfo ? pickThumbnailUrl(currentVideoInfo) : null;
+  if (posterUrl) {
+    trimPosterEl.src = posterUrl;
+    trimPosterEl.classList.remove('hidden');
+  }
+
+  const previewUrl = pickPreviewFormatUrl(currentVideoInfo);
+  if (previewUrl) {
+    trimVideoEl.src = previewUrl;
+    trimVideoEl.classList.remove('hidden');
+    trimPlayBtn.classList.remove('hidden');
+    trimTimeLabelEl.classList.remove('hidden');
+  }
+
+  if (trimDuration) {
+    renderTrimRange();
+  }
+  renderTrimChapterMarkers();
+  updateTrimTimeLabel();
+}
+
+function resetTrimPreview() {
+  trimPreviewInitialized = false;
+  trimDuration = 0;
+  trimRangeStart = 0;
+  trimRangeEnd = 0;
+  trimActiveHandle = null;
+  pauseTrimPreview();
+  trimVideoEl.removeAttribute('src');
+  trimVideoEl.load();
+  trimVideoEl.classList.add('hidden');
+  trimPosterEl.removeAttribute('src');
+  trimPosterEl.classList.add('hidden');
+  trimPlayBtn.classList.add('hidden');
+  trimTimeLabelEl.classList.add('hidden');
+  trimPlayBtn.innerHTML = '&#9654;';
+  trimHandleStartEl.style.left = '0%';
+  trimHandleEndEl.style.left = '100%';
+  trimRangeFillEl.style.left = '0%';
+  trimRangeFillEl.style.width = '100%';
+  trimRangeChaptersEl.innerHTML = '';
+  trimTimeLabelEl.textContent = '0:00 / 0:00';
+}
+
+function pauseTrimPreview() {
+  if (trimVideoEl && !trimVideoEl.paused) trimVideoEl.pause();
+}
+
+// Suelta la conexión de red de la preview (pausa + le saca el "src") sin
+// tocar el tramo elegido (trimRangeStart/End) ni los inputs. La usamos al
+// cerrar "Opciones avanzadas" y, sobre todo, justo antes de arrancar una
+// descarga: mantener el <video> de la preview reproduciendo/buffereando el
+// mismo link (a veces el mismo host/sesión que va a usar yt-dlp, ej.
+// googlevideo) puede competir por la conexión y hacer que la descarga real
+// quede pegada en 0%. Se re-arma solo, sin volver a consultar el video, la
+// próxima vez que se abra el menú (initTrimPreview vuelve a poner el src).
+function releaseTrimVideoStream() {
+  pauseTrimPreview();
+  if (trimVideoEl.hasAttribute('src')) {
+    trimVideoEl.removeAttribute('src');
+    trimVideoEl.load();
+  }
+  trimVideoEl.classList.add('hidden');
+  trimPlayBtn.classList.add('hidden');
+  trimTimeLabelEl.classList.add('hidden');
+  trimPlayBtn.innerHTML = '&#9654;';
+  trimPreviewInitialized = false;
+}
+
+// Si el link no se puede reproducir directo (CORS, geo, requiere cookies,
+// etc.) nos quedamos solo con la miniatura estática y la barra de rango
+// sigue funcionando igual, solo que sin "vista previa" del cuadro exacto.
+trimVideoEl.addEventListener('error', () => {
+  trimVideoEl.classList.add('hidden');
+  trimPlayBtn.classList.add('hidden');
+  trimTimeLabelEl.classList.add('hidden');
+});
+
+trimVideoEl.addEventListener('loadedmetadata', () => {
+  if (!trimDuration && trimVideoEl.duration) {
+    trimDuration = trimVideoEl.duration;
+    trimRangeEnd = trimDuration;
+    renderTrimRange();
+    renderTrimChapterMarkers();
+  }
+  updateTrimTimeLabel();
+});
+
+trimVideoEl.addEventListener('timeupdate', () => {
+  updateTrimTimeLabel();
+  // Mientras reproduce la preview, la encerramos dentro del tramo elegido
+  // (igual que un editor de recorte de verdad) en vez de seguir de largo.
+  if (!trimVideoEl.paused && trimVideoEl.currentTime >= trimRangeEnd) {
+    trimVideoEl.currentTime = trimRangeStart;
+  }
+});
+
+trimVideoEl.addEventListener('play', () => {
+  trimPlayBtn.innerHTML = '&#10074;&#10074;';
+});
+trimVideoEl.addEventListener('pause', () => {
+  trimPlayBtn.innerHTML = '&#9654;';
+});
+
+function updateTrimTimeLabel() {
+  const current = trimVideoEl && !trimVideoEl.paused ? trimVideoEl.currentTime : trimRangeStart;
+  trimTimeLabelEl.textContent = `${formatClock(current)} / ${formatClock(trimDuration)}`;
+}
+
+trimPlayBtn.addEventListener('click', () => {
+  if (trimVideoEl.classList.contains('hidden')) return;
+  if (trimVideoEl.paused) {
+    if (trimVideoEl.currentTime < trimRangeStart || trimVideoEl.currentTime >= trimRangeEnd) {
+      trimVideoEl.currentTime = trimRangeStart;
+    }
+    trimVideoEl.play().catch(() => {});
+  } else {
+    trimVideoEl.pause();
+  }
+});
+
+// Dibuja las manijas y el tramo resaltado según trimRangeStart/trimRangeEnd,
+// y refleja los mismos valores en los inputs "Desde"/"Hasta" de toda la vida.
+function renderTrimRange() {
+  if (!trimDuration) return;
+  const startPct = Math.min(100, Math.max(0, (trimRangeStart / trimDuration) * 100));
+  const endPct = Math.min(100, Math.max(0, (trimRangeEnd / trimDuration) * 100));
+  trimHandleStartEl.style.left = `${startPct}%`;
+  trimHandleEndEl.style.left = `${endPct}%`;
+  trimRangeFillEl.style.left = `${startPct}%`;
+  trimRangeFillEl.style.width = `${Math.max(0, endPct - startPct)}%`;
+  trimStartInput.value = secondsToTimestamp(trimRangeStart);
+  trimEndInput.value = secondsToTimestamp(trimRangeEnd);
+  setTrimError('');
+}
+
+// Dibuja una marquita por cada división entre capítulos (si el video los
+// tiene, según "chapters" que viene en la info de yt-dlp), para ubicarse
+// sin tener que ir tanteando con la barra.
+function renderTrimChapterMarkers() {
+  trimRangeChaptersEl.innerHTML = '';
+  const chapters =
+    currentVideoInfo && Array.isArray(currentVideoInfo.chapters) ? currentVideoInfo.chapters : [];
+  if (!trimDuration || !chapters.length) return;
+
+  chapters.forEach((chapter) => {
+    const start = chapter && chapter.start_time;
+    // El inicio del primer capítulo (0) y el final del video no se marcan,
+    // solo las divisiones intermedias entre un capítulo y el siguiente.
+    if (!Number.isFinite(start) || start <= 0 || start >= trimDuration) return;
+    const mark = document.createElement('div');
+    mark.className = 'trim-chapter-mark';
+    mark.style.left = `${(start / trimDuration) * 100}%`;
+    if (chapter.title) mark.title = chapter.title;
+    trimRangeChaptersEl.appendChild(mark);
+  });
+}
+
+function seekTrimPreview(seconds) {
+  if (trimVideoEl.classList.contains('hidden')) return;
+  pauseTrimPreview();
+  trimVideoEl.currentTime = seconds;
+}
+
+function ratioFromPointerEvent(e) {
+  const rect = trimRangeEl.getBoundingClientRect();
+  return Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+}
+
+function onTrimHandlePointerMove(e) {
+  if (!trimActiveHandle || !trimDuration) return;
+  const seconds = ratioFromPointerEvent(e) * trimDuration;
+  if (trimActiveHandle === 'start') {
+    trimRangeStart = Math.min(seconds, trimRangeEnd - 1);
+    trimRangeStart = Math.max(0, trimRangeStart);
+  } else {
+    trimRangeEnd = Math.max(seconds, trimRangeStart + 1);
+    trimRangeEnd = Math.min(trimDuration, trimRangeEnd);
+  }
+  renderTrimRange();
+  seekTrimPreview(trimActiveHandle === 'start' ? trimRangeStart : trimRangeEnd);
+}
+
+function onTrimHandlePointerUp() {
+  trimActiveHandle = null;
+  document.removeEventListener('pointermove', onTrimHandlePointerMove);
+  document.removeEventListener('pointerup', onTrimHandlePointerUp);
+}
+
+function beginTrimHandleDrag(handle) {
+  if (!trimDuration) return;
+  trimActiveHandle = handle;
+  document.addEventListener('pointermove', onTrimHandlePointerMove);
+  document.addEventListener('pointerup', onTrimHandlePointerUp);
+}
+
+trimHandleStartEl.addEventListener('pointerdown', (e) => {
+  e.preventDefault();
+  beginTrimHandleDrag('start');
+});
+trimHandleEndEl.addEventListener('pointerdown', (e) => {
+  e.preventDefault();
+  beginTrimHandleDrag('end');
+});
+
+// Click directo sobre la barra (fuera de las manijas): movemos la manija más cercana ahí.
+trimRangeEl.addEventListener('pointerdown', (e) => {
+  if (!trimDuration) return;
+  if (e.target === trimHandleStartEl || e.target === trimHandleEndEl) return;
+  const seconds = ratioFromPointerEvent(e) * trimDuration;
+  const distStart = Math.abs(seconds - trimRangeStart);
+  const distEnd = Math.abs(seconds - trimRangeEnd);
+  if (distStart <= distEnd) {
+    trimRangeStart = Math.min(seconds, trimRangeEnd - 1);
+  } else {
+    trimRangeEnd = Math.max(seconds, trimRangeStart + 1);
+  }
+  renderTrimRange();
+  seekTrimPreview(seconds);
+});
+
+// Si el usuario escribe a mano en "Desde"/"Hasta", movemos las manijas para que calcen.
+function syncTrimHandlesFromInputs() {
+  if (!trimDuration) return;
+  const startSeconds = parseTimeToSeconds(trimStartInput.value);
+  const endSeconds = parseTimeToSeconds(trimEndInput.value);
+  if (startSeconds === null || endSeconds === null || endSeconds <= startSeconds) return;
+  trimRangeStart = Math.min(Math.max(0, startSeconds), trimDuration);
+  trimRangeEnd = Math.min(Math.max(trimRangeStart + 1, endSeconds), trimDuration);
+  renderTrimRange();
+}
+
+trimStartInput.addEventListener('change', syncTrimHandlesFromInputs);
+trimEndInput.addEventListener('change', syncTrimHandlesFromInputs);
+
+// Valida los campos "Desde"/"Hasta" y devuelve { start, end } en "hh:mm:ss"
+// listos para mandar a main.js, o null si el corte está desactivado.
+// Lanza un Error con el mensaje ya traducido si algo no es válido, para que
+// el llamador lo muestre en el status en vez de arrancar una descarga rota.
+function resolveTrimSection() {
+  if (!trimEnabledCheckbox.checked) return null;
+
+  const startStr = trimStartInput.value.trim();
+  const endStr = trimEndInput.value.trim();
+  if (!startStr || !endStr) {
+    throw new Error(window.i18n.t('err_trim_required'));
+  }
+
+  const startSeconds = parseTimeToSeconds(startStr);
+  const endSeconds = parseTimeToSeconds(endStr);
+  if (startSeconds === null || endSeconds === null) {
+    throw new Error(window.i18n.t('err_trim_invalid_format'));
+  }
+  if (endSeconds <= startSeconds) {
+    throw new Error(window.i18n.t('err_trim_end_before_start'));
+  }
+  const totalDuration = currentVideoInfo && currentVideoInfo.duration;
+  if (totalDuration && startSeconds >= totalDuration) {
+    throw new Error(
+      window.i18n.t('err_trim_beyond_duration', { duration: formatDuration(totalDuration) })
+    );
+  }
+
+  return {
+    start: secondsToTimestamp(startSeconds),
+    end: secondsToTimestamp(endSeconds),
+    exact: trimExactCheckbox.checked,
+  };
+}
+
 // Si la miniatura no carga (link caído, sin CORS, etc.), la ocultamos en vez de mostrar el icono roto
 videoThumbEl.addEventListener('error', () => videoThumbEl.classList.add('hidden'));
 
@@ -650,6 +1179,178 @@ function pickThumbnailUrl(info) {
   }
   return null;
 }
+
+// ================= "YA DESCARGADO" (detecta si el video pegado ya se bajó antes) =================
+
+// Entrada del historial que coincide con el video actualmente cargado en el
+// picker (o null si no se encontró ninguna). Se recalcula cada vez que se
+// consulta un link nuevo y se vuelve a pintar si cambia el idioma.
+let lastDownloadedMatch = null;
+
+// Busca en el historial una descarga EXITOSA del mismo video. Primero
+// compara por id + extractor (así reconoce el mismo video aunque el usuario
+// haya pegado una URL distinta, ej. youtu.be/xxx vs youtube.com/watch?v=xxx).
+// Si el video actual o alguna entrada vieja del historial no tienen esos
+// datos (guardados antes de esta función), cae a comparar la URL tal cual.
+async function checkIfAlreadyDownloaded(info, url) {
+  lastDownloadedMatch = null;
+  try {
+    const history = (await window.yoinksAPI.listHistory()) || [];
+    const videoId = info && info.id;
+    const extractorKey = info && info.extractor_key;
+    lastDownloadedMatch =
+      history.find((h) => {
+        if (!h || h.status !== 'success') return false;
+        if (videoId && extractorKey && h.videoId && h.extractorKey) {
+          return h.videoId === videoId && h.extractorKey === extractorKey;
+        }
+        return h.url === url;
+      }) || null;
+  } catch (e) {
+    lastDownloadedMatch = null;
+  }
+}
+
+// Pinta (o esconde) la etiqueta "Ya descargado" según lastDownloadedMatch.
+// Separado de la búsqueda en el historial para poder re-traducir la fecha
+// sin volver a pedirle el historial completo al proceso principal cada vez
+// que cambia el idioma.
+function renderAlreadyDownloadedBadge() {
+  if (!alreadyDownloadedBadgeEl) return;
+  // La visibilidad de la fila (.already-downloaded-row) ya no se decide acá:
+  // ahora también puede contener el botón "▶ Previsualizar" en streaming
+  // aunque el video no esté descargado, así que la resuelve
+  // updatePreviewVideoButton() combinando ambas partes.
+  if (!lastDownloadedMatch) {
+    alreadyDownloadedBadgeEl.classList.add('hidden');
+    alreadyDownloadedBadgeEl.classList.remove('clickable');
+    alreadyDownloadedBadgeEl.textContent = '';
+    alreadyDownloadedBadgeEl.removeAttribute('title');
+    alreadyDownloadedBadgeEl.onclick = null;
+    return;
+  }
+  let dateLabel = '';
+  if (lastDownloadedMatch.date) {
+    const d = new Date(lastDownloadedMatch.date);
+    if (!isNaN(d.getTime())) {
+      dateLabel = d.toLocaleDateString(window.i18n.getLanguage() === 'en' ? 'en-US' : 'es-ES', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+      });
+    }
+  }
+  alreadyDownloadedBadgeEl.textContent = dateLabel
+    ? `${window.i18n.t('already_downloaded')} · ${dateLabel}`
+    : window.i18n.t('already_downloaded');
+  alreadyDownloadedBadgeEl.classList.remove('hidden');
+
+  // Si el historial guardó la ruta del archivo, la etiqueta se vuelve
+  // clickeable y abre/selecciona ese archivo en el explorador (mismo
+  // comportamiento que "Mostrar en carpeta" del resto de la app).
+  const filePath = lastDownloadedMatch.path || null;
+  if (filePath) {
+    alreadyDownloadedBadgeEl.classList.add('clickable');
+    alreadyDownloadedBadgeEl.title = window.i18n.t('already_downloaded_open_hint');
+    alreadyDownloadedBadgeEl.onclick = () => window.yoinksAPI.showInFolder(filePath);
+  } else {
+    alreadyDownloadedBadgeEl.classList.remove('clickable');
+    alreadyDownloadedBadgeEl.removeAttribute('title');
+    alreadyDownloadedBadgeEl.onclick = null;
+  }
+}
+
+// ---- Modal de previsualización: reproduce el video en streaming dentro de la app ----
+// (mismo criterio que el editor de corte: usamos el link directo http/https
+// que yt-dlp trae en "formats", así no hace falta tener el archivo descargado.
+// La diferencia es que acá puede venir en dos partes -video-only + audio-only-
+// cuando esa combinación da mejor calidad que el progresivo; ver pickPreviewSource).
+function openVideoPreview(source, title) {
+  previewVideoTitleEl.textContent = title || '';
+  previewVideoErrorEl.classList.add('hidden');
+  previewVideoElEl.classList.remove('hidden');
+  previewVideoElEl.src = source.videoUrl;
+
+  if (source.audioUrl) {
+    previewAudioEl.src = source.audioUrl;
+    previewAudioEl.currentTime = 0;
+    previewAudioEl.volume = previewVideoElEl.volume;
+    previewAudioEl.muted = previewVideoElEl.muted;
+  } else {
+    // Formato progresivo (o sin audio disponible): el audio ya viene
+    // incluido en el <video> o no existe, así que no necesitamos el <audio>
+    // en paralelo.
+    previewAudioEl.removeAttribute('src');
+    previewAudioEl.load();
+  }
+
+  previewVideoOverlayEl.classList.remove('hidden');
+  previewVideoElEl.play().catch(() => {}); // autoplay puede rechazarse en algunos casos; no es un error real
+}
+
+function closeVideoPreview() {
+  previewVideoOverlayEl.classList.add('hidden');
+  // Soltar el <video>/<audio> (pausa + src vacío) para no dejar la conexión
+  // abierta ni el audio sonando de fondo una vez cerrado el modal.
+  previewVideoElEl.pause();
+  previewVideoElEl.removeAttribute('src');
+  previewVideoElEl.load();
+  previewAudioEl.pause();
+  previewAudioEl.removeAttribute('src');
+  previewAudioEl.load();
+}
+
+previewVideoElEl.addEventListener('error', () => {
+  // El link puede haber expirado, requerir cookies, o (si es el archivo
+  // local de una versión anterior) haberse movido/borrado.
+  previewVideoElEl.classList.add('hidden');
+  previewVideoErrorEl.classList.remove('hidden');
+});
+
+// ---- Sincronización video (mudo si es video-only) + audio en paralelo ----
+// Cuando pickPreviewSource() combinó un formato video-only con uno
+// audio-only, el <video> no tiene pista de audio propia: todo el sonido
+// real sale del <audio> oculto, así que hay que llevarlo de la mano en
+// play/pausa/salto/volumen. Si el formato era progresivo (o sin audio),
+// previewAudioEl.src queda vacío y estos handlers no hacen nada.
+previewVideoElEl.addEventListener('play', () => {
+  if (previewAudioEl.src) previewAudioEl.play().catch(() => {});
+});
+previewVideoElEl.addEventListener('pause', () => {
+  if (previewAudioEl.src) previewAudioEl.pause();
+});
+previewVideoElEl.addEventListener('seeking', () => {
+  if (previewAudioEl.src) previewAudioEl.currentTime = previewVideoElEl.currentTime;
+});
+previewVideoElEl.addEventListener('timeupdate', () => {
+  // Corrección de deriva: si se desalinearon más de 300ms (buffering
+  // distinto en cada stream), volvemos a alinear el audio al video.
+  if (previewAudioEl.src && Math.abs(previewAudioEl.currentTime - previewVideoElEl.currentTime) > 0.3) {
+    previewAudioEl.currentTime = previewVideoElEl.currentTime;
+  }
+});
+previewVideoElEl.addEventListener('volumechange', () => {
+  // El control de volumen/mute nativo del <video> no afecta al <audio>
+  // oculto por sí solo (son elementos distintos), así que lo replicamos.
+  if (previewAudioEl.src) {
+    previewAudioEl.volume = previewVideoElEl.volume;
+    previewAudioEl.muted = previewVideoElEl.muted;
+  }
+});
+previewVideoElEl.addEventListener('ratechange', () => {
+  if (previewAudioEl.src) previewAudioEl.playbackRate = previewVideoElEl.playbackRate;
+});
+previewVideoElEl.addEventListener('ended', () => {
+  if (previewAudioEl.src) previewAudioEl.pause();
+});
+
+previewVideoCloseBtn.addEventListener('click', closeVideoPreview);
+previewVideoOverlayEl.addEventListener('click', (e) => {
+  if (e.target === previewVideoOverlayEl) closeVideoPreview(); // clic afuera del panel cierra, como el resto de los modales
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !previewVideoOverlayEl.classList.contains('hidden')) closeVideoPreview();
+});
 
 function renderVideoMeta(info) {
   videoTitleEl.textContent = info.title || window.i18n.t('no_title');
@@ -670,11 +1371,37 @@ function renderVideoMeta(info) {
   videoSubEl.textContent = parts.join(' · ');
 
   renderStatsPills(videoMetaStatsEl, info);
+  renderAlreadyDownloadedBadge();
+  updatePreviewVideoButton();
+}
+
+// "▶ Previsualizar" ya no depende de tener el archivo descargado: igual que
+// en el editor de corte, usamos el link directo que yt-dlp trae en
+// "formats" para reproducir el video en streaming dentro del modal, sin
+// tener que descargarlo primero. Se recalcula cada vez que cambia
+// currentVideoInfo (nueva consulta de link).
+function updatePreviewVideoButton() {
+  const source = pickPreviewSource(currentVideoInfo);
+  if (source) {
+    previewVideoBtn.classList.remove('hidden');
+    previewVideoBtn.onclick = () =>
+      openVideoPreview(source, (currentVideoInfo && currentVideoInfo.title) || videoTitleEl.textContent);
+  } else {
+    previewVideoBtn.classList.add('hidden');
+    previewVideoBtn.onclick = null;
+  }
+  // La fila se muestra si hay algo que mostrar en ella (badge "Ya
+  // descargado" y/o el botón de previsualizar), y se esconde solo si ambos
+  // están vacíos.
+  const rowEl = previewVideoBtn.parentElement; // .already-downloaded-row
+  if (rowEl) {
+    const showRow = !!source || !alreadyDownloadedBadgeEl.classList.contains('hidden');
+    rowEl.classList.toggle('hidden', !showRow);
+  }
 }
 
 // ================= INFORMACIÓN DEL VIDEO (sin descargar) =================
-
-infoBtn.addEventListener('click', handleVideoInfo);
+// (función conservada por si se vuelve a exponer desde otro lugar de la UI)
 
 async function handleVideoInfo() {
   const url = input.value.trim();
@@ -891,7 +1618,7 @@ document.addEventListener('keydown', (e) => {
 
 // "Descargar este video" / "Ver lista de videos": reutiliza lo ya consultado,
 // sin volver a llamar a yt-dlp, y salta directo a la pantalla correspondiente.
-videoInfoDownloadBtn.addEventListener('click', () => {
+videoInfoDownloadBtn.addEventListener('click', async () => {
   if (!videoInfoContext) return;
   closeVideoInfoPanel();
 
@@ -903,6 +1630,7 @@ videoInfoDownloadBtn.addEventListener('click', () => {
 
   currentUrl = videoInfoContext.url;
   currentVideoInfo = videoInfoContext.info;
+  await checkIfAlreadyDownloaded(videoInfoContext.info, videoInfoContext.url);
   renderVideoMeta(videoInfoContext.info);
   buildDownloadOptions(videoInfoContext.info);
   renderDownloadList();
@@ -1011,6 +1739,41 @@ function pickBestAudioFormat(info) {
   }, null);
 }
 
+// Formato de salida de audio que "corresponde" a la pista fuente detectada,
+// igual criterio que containerExt para video: si la fuente ya viene en un
+// formato que soportamos (AUDIO_FORMATS), se usa ese por defecto en vez de
+// forzar siempre mp3 — evita una recodificación innecesaria cuando yt-dlp
+// puede quedarse con el archivo original (ej. fuente ya es m4a u opus).
+function normalizeAudioExt(f) {
+  if (!f) return 'mp3';
+  const ext = String(f.ext || '').toLowerCase();
+  const acodec = String(f.acodec || '').toLowerCase();
+  if (ext === 'm4a' || acodec.startsWith('mp4a')) return 'm4a';
+  if (ext === 'opus' || acodec.startsWith('opus')) return 'opus';
+  if (ext === 'mp3' || acodec.startsWith('mp3')) return 'mp3';
+  return 'mp3';
+}
+
+// Nombre corto y reconocible del códec de video a partir del string crudo que
+// reporta yt-dlp (ej. "avc1.640028" -> "H264", "av01.0.05M.08" -> "AV1").
+function normalizeVideoCodec(vcodec) {  if (!vcodec || vcodec === 'none') return null;
+  const v = String(vcodec).toLowerCase();
+  if (v.startsWith('av01') || v.startsWith('av1')) return 'AV1';
+  if (v.startsWith('vp09') || v.startsWith('vp9')) return 'VP9';
+  if (v.startsWith('vp8')) return 'VP8';
+  if (v.startsWith('hev1') || v.startsWith('hvc1') || v.startsWith('h265')) return 'H265';
+  if (v.startsWith('avc1') || v.startsWith('h264')) return 'H264';
+  const base = v.split('.')[0];
+  return base ? base.toUpperCase() : null;
+}
+
+// Orden de preferencia al listar códecs en el select (compatibilidad primero).
+const CODEC_DISPLAY_ORDER = ['H264', 'AV1', 'VP9', 'H265', 'VP8'];
+function codecSortIndex(label) {
+  const idx = CODEC_DISPLAY_ORDER.indexOf(label);
+  return idx === -1 ? CODEC_DISPLAY_ORDER.length : idx;
+}
+
 function buildDownloadOptions(info) {
   formatItems = [];
   presetItems = [];
@@ -1048,6 +1811,26 @@ function buildDownloadOptions(info) {
   const bestFormats = [...bestByHeight.values()]
     .map((v) => v.format)
     .sort((a, b) => (b.height || 0) - (a.height || 0));
+
+  // ---- Variantes de códec disponibles por altura (para el selector de códec) ----
+  // Mismo criterio de "mejor variante" que bestByHeight de arriba, pero agrupado
+  // también por códec (H264/AV1/VP9/...), para no perder la de mayor calidad
+  // real dentro de cada códec al ofrecer el cambio.
+  const codecsByHeight = new Map(); // height -> Map(codecLabel -> { format, hasRealSize, qualityScore })
+  for (const f of videoFormats) {
+    const codecLabel = normalizeVideoCodec(f.vcodec);
+    if (!codecLabel) continue;
+    if (!codecsByHeight.has(f.height)) codecsByHeight.set(f.height, new Map());
+    const m = codecsByHeight.get(f.height);
+    const hasRealSize = !!(f.filesize || f.filesize_approx);
+    const qualityScore = f.tbr || f.vbr || (f.filesize || f.filesize_approx || 0) / 1000;
+    const current = m.get(codecLabel);
+    const isBetter =
+      !current ||
+      (hasRealSize && !current.hasRealSize) ||
+      (hasRealSize === current.hasRealSize && qualityScore > current.qualityScore);
+    if (isBetter) m.set(codecLabel, { format: f, hasRealSize, qualityScore });
+  }
 
   // El de mayor resolución/bitrate real que ya detectamos arriba
   const topFormat = bestFormats[0] || null;
@@ -1089,26 +1872,68 @@ function buildDownloadOptions(info) {
     const sizeInfo = combineSizeEstimates(estimateSizeBytes(f, info.duration), bestAudioSize);
     const sizeLabel = formatSizeLabel(sizeInfo);
 
+    // Contenedor de salida: se usa el que realmente reporta la fuente para
+    // ESE stream (ej. YouTube entrega webm en varias resoluciones, mp4 en
+    // otras). Si el contenedor reportado no es uno de los que soportamos
+    // (CONTAINER_FORMATS), se cae a mp4 por defecto. El usuario igual puede
+    // cambiarlo con el select de la fila.
+    const containerExt = CONTAINER_FORMATS.includes(f.ext) ? f.ext : 'mp4';
+
+    // Variantes de códec disponibles para ESTA altura (ej. YouTube suele
+    // ofrecer H264, VP9 y AV1 en la misma resolución). Si hay más de una,
+    // se arma la lista para el select; si solo hay una, se muestra como
+    // texto fijo (no hace falta elegir nada).
+    const heightCodecs = codecsByHeight.get(f.height);
+    let codecOptions = [];
+    if (heightCodecs && heightCodecs.size > 1) {
+      codecOptions = [...heightCodecs.entries()]
+        .sort((a, b) => codecSortIndex(a[0]) - codecSortIndex(b[0]))
+        .map(([label, v]) => {
+          const vSizeInfo = combineSizeEstimates(estimateSizeBytes(v.format, info.duration), bestAudioSize);
+          return {
+            label,
+            formatId: v.format.format_id,
+            ext: CONTAINER_FORMATS.includes(v.format.ext) ? v.format.ext : 'mp4',
+            size: formatSizeLabel(vSizeInfo),
+          };
+        });
+    }
+
     formatItems.push({
       res: `${f.height}p`,
-      // Contenedor de salida por defecto: siempre MP4, sin importar el que
-      // reporte la fuente para ese stream (YouTube suele entregar webm en
-      // varias resoluciones); el usuario lo puede cambiar con el select.
-      ext: 'mp4',
+      ext: containerExt,
       size: sizeLabel,
       formatId: f.format_id,
       audioOnly: false,
+      codec: normalizeVideoCodec(f.vcodec),
+      codecOptions,
     });
   }
 
   // ---- Opciones de solo-audio: mismo audio fuente, distintos niveles de calidad ----
   // (bitrate objetivo al que se re-codifica el audio; el formato de salida
   // sigue siendo elegible con el select de la columna "Formato", por defecto MP3).
-  const audioQualityOptions = [
-    { res: window.i18n.t('audio_quality_high'), bitrateKbps: 192 },
-    { res: window.i18n.t('audio_quality_medium'), bitrateKbps: 128 },
-    { res: window.i18n.t('audio_quality_low'), bitrateKbps: 64 },
-  ];
+  // Solo se muestran los niveles que tengan sentido según el bitrate REAL de
+  // la pista de audio fuente (bestAudioFormat, ya detectado más arriba): pedir
+  // una tasa de bits mayor a la de la fuente no mejora nada, solo infla el
+  // archivo sin diferencia audible. Si no se pudo detectar el bitrate fuente
+  // (algún extractor no lo reporta), se muestran todos los niveles igual.
+  const ALL_AUDIO_BITRATES = [320, 256, 128, 96, 64];
+  const sourceAudioBitrateKbps = bestAudioFormat ? bestAudioFormat.abr || bestAudioFormat.tbr || null : null;
+  let audioBitrates = ALL_AUDIO_BITRATES;
+  if (sourceAudioBitrateKbps) {
+    const filtered = ALL_AUDIO_BITRATES.filter((kbps) => kbps <= sourceAudioBitrateKbps);
+    // Si la fuente es más baja que todos los niveles (ej. 48kbps), se deja
+    // igual el más bajo (64) para no dejar la lista de audio vacía.
+    audioBitrates = filtered.length ? filtered : [ALL_AUDIO_BITRATES[ALL_AUDIO_BITRATES.length - 1]];
+  }
+  const audioQualityOptions = audioBitrates.map((kbps) => ({
+    res: `${kbps} kb/s`,
+    bitrateKbps: kbps,
+  }));
+  // Formato por defecto: el que ya trae la fuente (mp3/m4a/opus), en vez de
+  // forzar siempre mp3 — igual criterio que containerExt para video.
+  const defaultAudioExt = normalizeAudioExt(bestAudioFormat);
   for (const aq of audioQualityOptions) {
     // Tamaño estimado a partir del bitrate objetivo de cada nivel (no del
     // bitrate original de la pista fuente), siempre aproximado.
@@ -1116,11 +1941,11 @@ function buildDownloadOptions(info) {
     const sizeInfo = estBytes ? { bytes: estBytes, approx: true } : null;
     formatItems.push({
       res: aq.res,
-      ext: 'mp3',
+      ext: defaultAudioExt,
       size: formatSizeLabel(sizeInfo),
       formatId: null,
       audioOnly: true,
-      audioFormat: 'mp3',
+      audioFormat: defaultAudioExt,
       audioBitrateKbps: aq.bitrateKbps,
     });
   }
@@ -1345,12 +2170,39 @@ function renderDownloadList() {
   header.innerHTML = `
     <span class="col-res">${window.i18n.t('col_quality')}</span>
     <span class="col-ext">${window.i18n.t('col_format')}</span>
+    <span class="col-codec">${window.i18n.t('col_codec')}</span>
     <span class="col-size">${window.i18n.t('col_size')}</span>
   `;
   downloadListInner.appendChild(header);
 
+  // Sub-separadores "Video" / "Audio" dentro de "Formatos detectados": marcan
+  // dónde empieza cada bloque, para que no se lean como una lista continua.
+  // Solo se muestran si hay AMBOS tipos de filas (si el link es solo-audio o
+  // solo-video, no tiene sentido separar nada).
+  const hasVideoRows = formatItems.some((opt) => !opt.isPreset && !opt.audioOnly);
+  const hasAudioRows = formatItems.some((opt) => !opt.isPreset && opt.audioOnly);
+  let videoSubdividerShown = false;
+  let audioSubdividerShown = false;
+
   formatItems.forEach((opt, i) => {
-    if (!opt.isPreset) appendOptionRow(opt, i);
+    if (opt.isPreset) return;
+    if (hasVideoRows && hasAudioRows && !opt.audioOnly && !videoSubdividerShown) {
+      const videoDivider = document.createElement('div');
+      videoDivider.className = 'download-subdivider glitch-text';
+      videoDivider.textContent = window.i18n.t('video_only_divider');
+      videoDivider.dataset.text = window.i18n.t('video_only_divider');
+      downloadListInner.appendChild(videoDivider);
+      videoSubdividerShown = true;
+    }
+    if (hasVideoRows && hasAudioRows && opt.audioOnly && !audioSubdividerShown) {
+      const audioDivider = document.createElement('div');
+      audioDivider.className = 'download-subdivider glitch-text';
+      audioDivider.textContent = window.i18n.t('audio_only_divider');
+      audioDivider.dataset.text = window.i18n.t('audio_only_divider');
+      downloadListInner.appendChild(audioDivider);
+      audioSubdividerShown = true;
+    }
+    appendOptionRow(opt, i);
   });
 }
 
@@ -1411,12 +2263,23 @@ function appendOptionRow(opt, i) {
     const extCell = `<select class="ext-select" data-idx="${i}" title="${window.i18n.t('output_format_tooltip')}">
           ${formatOptions.map((fmt) => `<option value="${fmt}" ${opt.ext === fmt ? 'selected' : ''}>${fmt.toUpperCase()}</option>`).join('')}
         </select>`;
+    // Celda de códec: solo las filas de video con más de una variante detectada
+    // (ej. H264 + VP9 + AV1 en la misma resolución) muestran un select; el resto
+    // muestra el nombre del códec como texto fijo, o un guion si no se detectó
+    // (filas de audio, o el sitio no reportó vcodec).
+    const codecCell =
+      !opt.audioOnly && opt.codecOptions && opt.codecOptions.length > 1
+        ? `<select class="codec-select" data-idx="${i}" title="${window.i18n.t('codec_tooltip')}">
+            ${opt.codecOptions.map((c) => `<option value="${c.label}" ${opt.codec === c.label ? 'selected' : ''}>${c.label}</option>`).join('')}
+          </select>`
+        : `<span class="codec-static">${!opt.audioOnly && opt.codec ? opt.codec : '—'}</span>`;
     row.innerHTML = `
       <span class="arrow" data-text="${i === selectedIndex ? '>' : ''}">${i === selectedIndex ? '&gt;' : ''}</span>
       <span class="arrow" data-text="${icon}">${icon}</span>
       ${badge ? `<span class="quality-badge quality-badge-${badge.toLowerCase()}" data-text="${badge}">${badge}</span>` : '<span class="quality-badge-spacer"></span>'}
       <span class="res" data-text="${opt.res}">${opt.res}</span>
       ${extCell}
+      ${codecCell}
       <span class="size" data-text="${opt.size}">${opt.size}</span>
     `;
   }
@@ -1437,6 +2300,26 @@ function appendOptionRow(opt, i) {
       // Para el preajuste de audio, el valor elegido también define el
       // formato de extracción real que se manda a yt-dlp (--audio-format).
       if (opt.audioOnly) opt.audioFormat = e.target.value;
+      selectedIndex = i;
+      renderDownloadList();
+    });
+  }
+
+  const codecSelect = row.querySelector('.codec-select');
+  if (codecSelect) {
+    codecSelect.addEventListener('click', (e) => e.stopPropagation());
+    codecSelect.addEventListener('change', (e) => {
+      e.stopPropagation();
+      // Cambiar de códec cambia el format_id real a descargar (es un stream
+      // de video distinto), y arrastra consigo su propio contenedor nativo
+      // y peso estimado, igual que hace containerExt al armar la lista.
+      const chosen = opt.codecOptions.find((c) => c.label === e.target.value);
+      if (chosen) {
+        opt.codec = chosen.label;
+        opt.formatId = chosen.formatId;
+        opt.ext = chosen.ext;
+        opt.size = chosen.size;
+      }
       selectedIndex = i;
       renderDownloadList();
     });
@@ -1753,6 +2636,20 @@ input.addEventListener('keydown', (e) => {
 
 async function startDownload(opt) {
   const label = opt.isPreset ? opt.res : `${opt.res}`;
+
+  let trimSection;
+  try {
+    trimSection = resolveTrimSection();
+  } catch (err) {
+    setStatus(err.message, 'error', 'picker');
+    return;
+  }
+
+  // Soltamos la preview de "Cortar video" (si estaba reproduciendo/buffereando)
+  // antes de arrancar la descarga real, para que no compitan por la misma
+  // conexión/host y la descarga no quede pegada en 0%.
+  releaseTrimVideoStream();
+
   setStatus(window.i18n.t('downloading_label_pct', { label, pct: 0 }), '', 'picker');
 
   const payload = {
@@ -1764,6 +2661,8 @@ async function startDownload(opt) {
     // para las filas de solo-audio; el preajuste "Mejor audio" no define uno
     // (usa la mejor calidad disponible por defecto en main.js).
     audioBitrateKbps: opt.audioOnly ? opt.audioBitrateKbps : undefined,
+    // Tramo a recortar (ver sección "Cortar video"), null si no está activado.
+    trimSection,
     // Contenedor de salida elegido en la columna "Formato" (mp4/mkv/webm/mov).
     // Aplica a filas de video normales y al preajuste "Mejor video y audio
     // disponible" (también editable); se ignora para audio y presets custom.
@@ -1807,6 +2706,14 @@ async function startDownload(opt) {
         });
       }
       finishActiveDownload(downloadId, 'done');
+      // Si el usuario sigue viendo el picker de este mismo video, actualizamos
+      // la etiqueta "Ya descargado" al toque, sin esperar a que vuelva a
+      // pegar el link.
+      if (isVisible && currentVideoInfo) {
+        await checkIfAlreadyDownloaded(currentVideoInfo, currentUrl);
+        renderAlreadyDownloadedBadge();
+        updatePreviewVideoButton();
+      }
     }
   } catch (err) {
     if (currentPickerStatusOwner === downloadId) {
@@ -1990,13 +2897,19 @@ function renderPresetsTable() {
     // idioma activo (igual que las filas ★ del listado de descarga) en vez
     // del texto fijo guardado en disco.
     const displayName = p.builtin ? window.i18n.t(p.builtin) : p.name;
+    // Las dos entradas "builtin" se pueden editar como cualquier otro
+    // preajuste, pero no se pueden eliminar: en vez del botón "eliminar"
+    // muestran una etiqueta fija indicando que están protegidas.
+    const deleteCell = p.builtin
+      ? `<span class="preset-locked" title="${window.i18n.t('preset_builtin_locked')}">${window.i18n.t('preset_builtin_locked')}</span>`
+      : `<button class="preset-delete" data-index="${i}">${window.i18n.t('btn_delete')}</button>`;
     tr.innerHTML = `
       <td class="site">${escapeHtml(p.site)}</td>
       <td class="name">${escapeHtml(displayName)}</td>
       <td class="options">${escapeHtml(p.options)}</td>
       <td class="actions">
         <button class="preset-edit" data-index="${i}">${window.i18n.t('btn_edit')}</button>
-        <button class="preset-delete" data-index="${i}">${window.i18n.t('btn_delete')}</button>
+        ${deleteCell}
       </td>
     `;
     presetsTbody.appendChild(tr);
@@ -2534,10 +3447,15 @@ function setActiveDownloadStatus(id, status) {
 // "pausar"/"cancelar" podía caer justo cuando el botón se destruye y se
 // vuelve a crear, y el navegador nunca llegaba a disparar el evento
 // (parecía que el botón "no respondía").
-function setActiveDownloadProgress(id, percent, speed, eta) {
+function setActiveDownloadProgress(id, percent, speed, eta, indeterminate, indeterminateLabelKey) {
   const d = activeDownloads.find((x) => x.id === id);
   if (!d) return;
   const wasQueued = d.status === 'queued';
+  // "indeterminate" llega true al arrancar una descarga con recorte (exacto o
+  // no), mientras no haya llegado un % real (ver main.js); llega false en
+  // cuanto aparece uno, así que no se pisa un valor previo sin querer.
+  if (indeterminate !== undefined) d.indeterminate = indeterminate;
+  if (indeterminateLabelKey) d.indeterminateLabelKey = indeterminateLabelKey;
   d.percent = percent;
   d.speed = speed || null;
   d.eta = eta || null;
@@ -2547,13 +3465,19 @@ function setActiveDownloadProgress(id, percent, speed, eta) {
   if (row) {
     const fill = row.querySelector('.update-progress-fill');
     const text = row.querySelector('.update-progress-text');
-    if (fill) fill.style.width = percent + '%';
-    if (text) text.textContent = percent.toFixed(0) + '%';
+    if (fill) fill.classList.toggle('indeterminate', !!d.indeterminate);
+    if (d.indeterminate) {
+      if (fill) fill.style.width = '';
+      if (text) text.textContent = window.i18n.t(d.indeterminateLabelKey || 'status_trimming');
+    } else {
+      if (fill) fill.style.width = percent + '%';
+      if (text) text.textContent = percent.toFixed(0) + '%';
+    }
 
     const speedText = row.querySelector('.active-dl-speed-text');
     if (speedText) {
       speedText.textContent = formatDownloadSpeedEta(speed, eta);
-      speedText.classList.toggle('hidden', !speed && !eta);
+      speedText.classList.toggle('hidden', d.indeterminate || (!speed && !eta));
     }
 
     updateDownloadsSpeedSummary();
@@ -2722,7 +3646,7 @@ async function playNotificationSoundIfEnabled() {
 const progressCallbacks = new Map(); // downloadId -> function(percent)
 window.yoinksAPI.onProgress((data) => {
   if (!data || data.id === undefined) return;
-  setActiveDownloadProgress(data.id, data.percent, data.speed, data.eta);
+  setActiveDownloadProgress(data.id, data.percent, data.speed, data.eta, data.indeterminate, data.indeterminateLabelKey);
   const cb = progressCallbacks.get(data.id);
   if (cb) cb(data.percent);
 });
@@ -2955,9 +3879,9 @@ function renderDownloadsPanel() {
         ${
           showProgress
             ? `<div class="update-progress">
-                 <div class="update-progress-bar"><div class="update-progress-fill" style="width:${d.percent}%"></div></div>
-                 <span class="update-progress-text">${d.percent.toFixed(0)}%</span>
-                 <span class="active-dl-speed-text ${d.speed || d.eta ? '' : 'hidden'}">${escapeHtml(formatDownloadSpeedEta(d.speed, d.eta))}</span>
+                 <div class="update-progress-bar"><div class="update-progress-fill${d.indeterminate ? ' indeterminate' : ''}" style="${d.indeterminate ? '' : `width:${d.percent}%`}"></div></div>
+                 <span class="update-progress-text">${d.indeterminate ? escapeHtml(window.i18n.t(d.indeterminateLabelKey || 'status_trimming')) : d.percent.toFixed(0) + '%'}</span>
+                 <span class="active-dl-speed-text ${!d.indeterminate && (d.speed || d.eta) ? '' : 'hidden'}">${escapeHtml(formatDownloadSpeedEta(d.speed, d.eta))}</span>
                </div>`
             : ''
         }
@@ -3306,7 +4230,24 @@ function applyDownloadSettingsToForm(settings) {
   settingRateLimitInput.value = settings.rateLimit || '';
   settingRateLimitModeSelect.value = settings.rateLimitMode === 'total' ? 'total' : 'perFile';
   settingConcurrentDownloadsSelect.value = String(settings.concurrentDownloads || 1);
+
+  // Subtítulos/capítulos son opt-in (default apagado); miniaturas mantiene el
+  // comportamiento histórico de la app (default prendido).
+  settingSubtitlesEnabledCheckbox.checked = settings.subtitlesEnabled === true;
+  settingSubtitleLangsInput.value = settings.subtitleLangs || '';
+  settingSubtitleModeSelect.value = ['embed', 'file', 'both'].includes(settings.subtitleMode) ? settings.subtitleMode : 'embed';
+  updateSubtitleRowsVisibility();
+  settingThumbnailsEnabledCheckbox.checked = settings.thumbnailsEnabled !== false;
+  settingChaptersEnabledCheckbox.checked = settings.chaptersEnabled === true;
 }
+
+function updateSubtitleRowsVisibility() {
+  const enabled = settingSubtitlesEnabledCheckbox.checked;
+  settingSubtitlesOptionsRow.classList.toggle('hidden', !enabled);
+  settingSubtitleModeRow.classList.toggle('hidden', !enabled);
+}
+
+settingSubtitlesEnabledCheckbox.addEventListener('change', updateSubtitleRowsVisibility);
 
 function openDownloadSettingsPanel() {
   closeAllOverlayPanels();
@@ -3362,6 +4303,13 @@ downloadSettingsSaveBtn.addEventListener('click', async () => {
     rateLimit: settingRateLimitInput.value.trim(),
     rateLimitMode: settingRateLimitModeSelect.value === 'total' ? 'total' : 'perFile',
     concurrentDownloads: parseInt(settingConcurrentDownloadsSelect.value, 10) || 1,
+    subtitlesEnabled: settingSubtitlesEnabledCheckbox.checked,
+    subtitleLangs: settingSubtitleLangsInput.value.trim(),
+    subtitleMode: settingSubtitleModeSelect.value === 'file' || settingSubtitleModeSelect.value === 'both'
+      ? settingSubtitleModeSelect.value
+      : 'embed',
+    thumbnailsEnabled: settingThumbnailsEnabledCheckbox.checked,
+    chaptersEnabled: settingChaptersEnabledCheckbox.checked,
     soundEnabled: current.soundEnabled,
     closeBehavior: current.closeBehavior,
   };

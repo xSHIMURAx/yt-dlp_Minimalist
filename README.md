@@ -61,6 +61,10 @@ Both files were scanned on VirusTotal and came back clean:
 
 ## Screenshots
 
+**Format & Quality Selection (live demo)**
+
+<video src="screenshots/quality-picker-demo.mp4" controls width="800"></video>
+
 **Video Information and Quality Selection**
 
 ![Video Information](screenshots/01.png)

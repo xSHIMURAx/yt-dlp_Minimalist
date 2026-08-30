@@ -1,6 +1,16 @@
 const { app, BrowserWindow, ipcMain, shell, dialog, session, safeStorage, Tray, Menu } = require('electron');
 const path = require('path');
 
+// Nombre visible de la app y, de paso, de la carpeta de datos de usuario que
+// Electron arma solo (%APPDATA%\YT-DLP Minimalist en Windows, ~/Library/
+// Application Support/YT-DLP Minimalist en macOS, ~/.config/YT-DLP Minimalist
+// en Linux). Antes la app se llamaba "yt-dlp-interface" (nombre del paquete
+// npm) y esa carpeta quedaba con ese nombre viejo. Tiene que llamarse ANTES
+// de cualquier app.getPath('userData') (ver migrateUserDataFolder() más
+// abajo, que mueve los datos ya guardados con el nombre viejo a la carpeta
+// nueva la primera vez que se abre esta versión).
+app.setName('YT-DLP Minimalist');
+
 // APIs nativas como Tray (y en algunos casos el ícono de BrowserWindow) no
 // pueden leer archivos que quedan empaquetados DENTRO del .asar — solo Node
 // vía fs (patchado por Electron) puede. Por eso 'assets/icon.ico' se marca
@@ -230,14 +240,29 @@ function killProcessTree(proc) {
 }
 
 // ---- Presets predeterminados (mismo patrón que apps como media-downloader) ----
-// Antes esta lista incluía dos entradas "builtin" ("Mejor video y audio
-// disponible" / "Mejor audio disponible") para que también aparecieran,
-// editables y borrables, en el panel de administración de Preajustes
-// (⚙ → Preajustes). Se quitaron a pedido del usuario: esas dos opciones ya
-// existen aparte como filas ★ fijas en el listado de descarga (generadas en
-// renderer.js) y en el selector de calidad, así que no hace falta
-// duplicarlas también en la tabla de preajustes.
-const DEFAULT_PRESETS = [];
+// Dos entradas "builtin" ("Mejor video y audio disponible" / "Mejor audio
+// disponible") aparecen también, a pedido del usuario, en el panel de
+// administración de Preajustes (⚙ → Preajustes): ahí se pueden EDITAR
+// (sitio/opciones) pero no ELIMINAR (ver el guard en "presets:delete" y la
+// preservación del flag "builtin" en "presets:update" más abajo). Estas dos
+// opciones además siguen existiendo aparte como filas ★ fijas en el listado
+// de descarga (generadas en renderer.js) y en el selector de calidad; el
+// flag "builtin" se usa también en computePresetItemsForCurrentSite (ver
+// renderer.js) para excluirlas de esas listas y no duplicarlas ahí.
+const DEFAULT_PRESETS = [
+  {
+    builtin: 'best_video_audio',
+    site: 'Todos',
+    name: 'Mejor video y audio disponible',
+    options: '-f bv*+ba/b --merge-output-format mp4 --embed-thumbnail --add-metadata',
+  },
+  {
+    builtin: 'best_audio',
+    site: 'Todos',
+    name: 'Mejor audio disponible',
+    options: '-f bestaudio --extract-audio --audio-quality 0 --embed-thumbnail --add-metadata --audio-format mp3',
+  },
+];
 
 function getPresetsPath() {
   return path.join(app.getPath('userData'), 'presets.json');
@@ -252,18 +277,23 @@ function loadPresets() {
     }
     const raw = fs.readFileSync(filePath, 'utf-8');
     const parsed = JSON.parse(raw);
-    // Limpieza de instalaciones existentes: versiones anteriores guardaban
-    // en presets.json las dos entradas "builtin" (Mejor video y audio /
-    // Mejor audio disponible). Ya no se generan, así que si siguen ahí
-    // (porque el usuario nunca las tocó) se quitan una sola vez y se
-    // regrabra el archivo sin ellas. Si el usuario las había editado, el
-    // preset perdía su marcador "builtin" al guardarse y quedaba como uno
-    // normal, así que este filtro no lo toca.
-    const cleaned = Array.isArray(parsed) ? parsed.filter((p) => !p || !p.builtin) : parsed;
-    if (Array.isArray(parsed) && cleaned.length !== parsed.length) {
-      savePresetsToDisk(cleaned);
+    if (!Array.isArray(parsed)) return DEFAULT_PRESETS;
+
+    // Migración de instalaciones existentes: una versión anterior guardaba
+    // las dos entradas "builtin" y luego las quitó por completo del archivo.
+    // Si a este presets.json le faltan (porque nunca existieron o porque una
+    // versión vieja las borró), se reinsertan al principio -en el mismo
+    // orden que DEFAULT_PRESETS- una sola vez y se regrabra el archivo. Si
+    // el usuario ya las tenía (con o sin ediciones), no se tocan.
+    const missingBuiltins = DEFAULT_PRESETS.filter(
+      (def) => !parsed.some((p) => p && p.builtin === def.builtin)
+    );
+    if (missingBuiltins.length) {
+      const merged = [...missingBuiltins, ...parsed];
+      savePresetsToDisk(merged);
+      return merged;
     }
-    return cleaned;
+    return parsed;
   } catch (e) {
     return DEFAULT_PRESETS;
   }
@@ -301,6 +331,11 @@ function getDefaultSettings() {
     rateLimit: '', // ej. "1M", "500K" — vacío = sin límite
     rateLimitMode: 'perFile', // 'perFile' = el límite se aplica a cada descarga | 'total' = se reparte entre las descargas simultáneas
     concurrentDownloads: 1, // cuántos videos de una lista se descargan a la vez
+    subtitlesEnabled: false, // descargar subtítulos (--write-subs) en descargas de video
+    subtitleLangs: '', // códigos de idioma separados por coma para --sub-langs; vacío = todos ("all")
+    subtitleMode: 'embed', // 'embed' = incrustados en el video | 'file' = archivo .srt aparte | 'both' = ambos
+    thumbnailsEnabled: true, // incrustar la miniatura como carátula (--embed-thumbnail) — comportamiento histórico de la app
+    chaptersEnabled: false, // incrustar los capítulos del video (--embed-chapters)
     ytdlpChannel: 'nightly', // 'stable' | 'nightly' — de qué repo de GitHub se baja/compara yt-dlp
     soundEnabled: true, // sonido al terminar una descarga o la instalación automática de dependencias
     soundStyle: 'chime', // 'chime' (campanita, dos notas) | 'windows' (pitido del sistema, shell.beep)
@@ -461,6 +496,7 @@ function loadSettings() {
     merged.closeBehavior = ['ask', 'minimize', 'close'].includes(merged.closeBehavior) ? merged.closeBehavior : 'ask';
     merged.language = merged.language === 'en' ? 'en' : 'es';
     merged.rateLimitMode = merged.rateLimitMode === 'total' ? 'total' : 'perFile';
+    merged.subtitleMode = ['file', 'both'].includes(merged.subtitleMode) ? merged.subtitleMode : 'embed';
     merged.soundStyle = merged.soundStyle === 'windows' ? 'windows' : 'chime';
     return merged;
   } catch (e) {
@@ -478,6 +514,7 @@ function saveSettingsToDisk(settings) {
   merged.closeBehavior = ['ask', 'minimize', 'close'].includes(merged.closeBehavior) ? merged.closeBehavior : 'ask';
   merged.language = merged.language === 'en' ? 'en' : 'es';
   merged.rateLimitMode = merged.rateLimitMode === 'total' ? 'total' : 'perFile';
+  merged.subtitleMode = ['file', 'both'].includes(merged.subtitleMode) ? merged.subtitleMode : 'embed';
   merged.soundStyle = merged.soundStyle === 'windows' ? 'windows' : 'chime';
   fs.writeFileSync(getSettingsPath(), JSON.stringify(merged, null, 2), 'utf-8');
   return merged;
@@ -564,6 +601,84 @@ function buildSettingsArgs(settings, url) {
   }
 
   return { args, tempFiles };
+}
+
+// Arma los argumentos de yt-dlp para subtítulos/miniatura/capítulos según lo
+// activado en Configuración → Descargas. "container" es el contenedor final
+// (mp4/mkv/webm/mov para video, o el --audio-format para audio-only); se usa
+// para no pedir algo que ese contenedor no soporta:
+// - Miniatura incrustada: no soportada en webm, ni en audio wav.
+// - Subtítulos incrustados: yt-dlp solo los soporta en mp4/webm/mkv (no mov).
+// - Capítulos: se dejan pedir siempre que estén activados; yt-dlp los omite
+//   sin error si el video no tiene capítulos. EXCEPTO si se está recortando
+//   el video ("Cortar video"/trimSection): --embed-chapters incrusta la
+//   lista de capítulos ORIGINAL del video completo, con sus timestamps
+//   absolutos de siempre, aunque el archivo final solo tenga el tramo
+//   pedido. El resultado es un capítulo tipo "01:52 - Outro" que no
+//   corresponde a nada del archivo recortado (que puede durar 10
+//   segundos), así que se omite --embed-chapters cuando isTrimmed es true.
+function buildMediaExtrasArgs(settings, { audioOnly, container, isTrimmed }) {
+  const args = [];
+
+  const thumbnailsEnabled = settings.thumbnailsEnabled !== false;
+  const chaptersEnabled = settings.chaptersEnabled === true;
+  const subtitlesEnabled = settings.subtitlesEnabled === true;
+
+  const supportsEmbeddedThumbnail = audioOnly ? container !== 'wav' : container !== 'webm';
+  if (thumbnailsEnabled && supportsEmbeddedThumbnail) {
+    args.push('--embed-thumbnail');
+  }
+
+  if (chaptersEnabled && !isTrimmed) {
+    args.push('--embed-chapters');
+  }
+
+  // Subtítulos solo para descargas de video: incrustarlos en un archivo de
+  // solo audio no tiene sentido y --embed-subs no lo soporta.
+  if (subtitlesEnabled && !audioOnly) {
+    const rawLangs = (settings.subtitleLangs || '').trim();
+    // "-live_chat" excluye el chat en vivo (no son subtítulos reales, y en
+    // videos largos de YouTube puede ser un archivo enorme). Si el usuario
+    // dejó el campo de idiomas vacío, se piden todos los demás disponibles.
+    const subLangs = rawLangs ? `${rawLangs},-live_chat` : 'all,-live_chat';
+    const mode = ['file', 'both'].includes(settings.subtitleMode) ? settings.subtitleMode : 'embed';
+    const wantsEmbed = mode === 'embed' || mode === 'both';
+    // --embed-subs solo lo soporta yt-dlp en mp4/webm/mkv (no mov); si el
+    // contenedor no lo soporta, se cae a dejarlos como archivo aparte para no
+    // perder silenciosamente los subtítulos pedidos.
+    const canEmbed = ['mp4', 'webm', 'mkv'].includes(container);
+    args.push('--write-subs', '--write-auto-subs', '--sub-langs', subLangs);
+    if (wantsEmbed && canEmbed) {
+      args.push('--embed-subs');
+    }
+  }
+
+  return args;
+}
+
+// Arma los argumentos de yt-dlp para descargar solo un tramo del video (ver
+// "Cortar video" en el picker). "trimSection" viene del renderer como
+// { start, end } en formato "hh:mm:ss" (ya validado ahí), pero igual se
+// re-valida acá con una whitelist estricta antes de pasarlo como argumento
+// de yt-dlp, por si acaso.
+// --force-keyframes-at-cuts hace que ffmpeg re-codifique un poco alrededor
+// del corte para que arranque justo en el punto pedido (sin esto, yt-dlp
+// recorta al keyframe más cercano, que puede quedar varios segundos antes).
+// Esa re-codificación es inherentemente lenta (yt-dlp la re-codifica en
+// tiempo real con ffmpeg) y además no emite las líneas "[download] XX.X%"
+// que el resto de la app usa para el progreso, así que durante ese tramo
+// no hay % real que mostrar (ver isTrimmedDownload más abajo, que activa
+// el estado "indeterminado" de la barra en vez de dejarla clavada en 0%).
+// Si trimSection.exact === false, se omite --force-keyframes-at-cuts:
+// el corte queda al keyframe más cercano (menos preciso) pero la descarga
+// es mucho más rápida porque no hace falta re-codificar.
+function buildTrimArgs(trimSection) {
+  if (!trimSection || !trimSection.start || !trimSection.end) return [];
+  const TIME_RE = /^\d{1,3}:\d{2}:\d{2}$/;
+  if (!TIME_RE.test(trimSection.start) || !TIME_RE.test(trimSection.end)) return [];
+  const args = ['--download-sections', `*${trimSection.start}-${trimSection.end}`];
+  if (trimSection.exact !== false) args.push('--force-keyframes-at-cuts');
+  return args;
 }
 
 // Calcula el valor que se le pasa a --limit-rate según el modo elegido en
@@ -771,6 +886,34 @@ function sanitizeFolderName(name) {
   return cleaned || 'playlist';
 }
 
+// ---- Migración de la carpeta de datos de usuario (nombre viejo -> nuevo) ----
+// La app se llamaba "yt-dlp-interface" (nombre del paquete npm, sin espacios
+// ni mayúsculas) y esa era la carpeta que Electron usaba dentro de AppData/
+// Application Support/.config para guardar presets.json, history.json,
+// settings.json, cookies, etc. Ahora se llama "YT-DLP Minimalist" (ver
+// app.setName() arriba), así que sin esta migración quien actualice desde
+// una versión vieja vería la app "vacía" (historial, presets y configuración
+// perdidos de vista, aunque los archivos viejos sigan en disco). Se corre
+// una sola vez al arrancar, antes de que cualquier otra parte del código
+// llegue a leer/escribir en la carpeta nueva.
+const OLD_APP_NAME = 'yt-dlp-interface';
+
+function migrateUserDataFolder() {
+  try {
+    const oldPath = path.join(app.getPath('appData'), OLD_APP_NAME);
+    const newPath = app.getPath('userData');
+    if (oldPath === newPath) return; // nada que migrar (mismo nombre, no debería pasar)
+    if (fs.existsSync(newPath)) return; // la carpeta nueva ya existe: instalación nueva o ya migrada antes
+    if (!fs.existsSync(oldPath)) return; // no hay carpeta vieja: primera instalación de la app
+    fs.renameSync(oldPath, newPath);
+    console.log('[main] Carpeta de datos de usuario migrada de', oldPath, 'a', newPath);
+  } catch (e) {
+    // Si falla (ej. permisos, u otro proceso con el archivo abierto), la app
+    // sigue arrancando igual con la carpeta nueva vacía en vez de trabarse.
+    console.error('[main] No se pudo migrar la carpeta de datos de usuario:', e);
+  }
+}
+
 // ---- Historial de descargas ----
 const MAX_HISTORY_ENTRIES = 300;
 
@@ -801,6 +944,59 @@ function addHistoryEntry(entry) {
   if (history.length > MAX_HISTORY_ENTRIES) history.length = MAX_HISTORY_ENTRIES;
   saveHistoryToDisk(history);
 }
+
+// ---- Encabezados especiales para la vista previa en streaming ----
+// Algunos sitios (Bilibili es el caso típico) firman el link del video/audio,
+// pero además el CDN exige un Referer/User-Agent puntual en el pedido HTTP o
+// devuelve 403 — sin importar que la URL en sí sea válida y aunque haya
+// cookies cargadas (las cookies solo sirven para que yt-dlp pueda CONSULTAR
+// los formatos disponibles; no viajan solas con el pedido que hace el
+// <video>/<audio> del renderer). yt-dlp ya sabe qué headers hacen falta para
+// cada formato (vienen en "http_headers" dentro del JSON de "-J"), pero un
+// <video>/<audio> nativo no tiene forma de mandar headers custom en su
+// propio pedido. La vuelta: el renderer nos avisa qué URL exacta va a pedir
+// y con qué headers (ver 'preview:set-headers' / registerPreviewHeaders en
+// renderer.js), y acá los inyectamos justo antes de que salga la petición.
+const previewHeaderOverrides = new Map(); // url completa -> { header: valor, ... }
+const PREVIEW_HEADER_CACHE_LIMIT = 30; // tope simple para no crecer sin límite entre sesiones de preview
+
+function mergeHeadersCaseInsensitive(base, overrides) {
+  const result = { ...base };
+  const lowerToKey = {};
+  Object.keys(result).forEach((k) => (lowerToKey[k.toLowerCase()] = k));
+  Object.entries(overrides).forEach(([key, value]) => {
+    const existingKey = lowerToKey[key.toLowerCase()];
+    if (existingKey && existingKey !== key) delete result[existingKey];
+    result[key] = value;
+  });
+  return result;
+}
+
+function registerPreviewHeaderInterceptor() {
+  session.defaultSession.webRequest.onBeforeSendHeaders((details, callback) => {
+    const extra = previewHeaderOverrides.get(details.url);
+    if (extra) {
+      callback({ requestHeaders: mergeHeadersCaseInsensitive(details.requestHeaders, extra) });
+      return;
+    }
+    callback({ requestHeaders: details.requestHeaders });
+  });
+}
+
+ipcMain.handle('preview:set-headers', (_event, entries) => {
+  if (!Array.isArray(entries)) return;
+  entries.forEach((entry) => {
+    if (!entry || !entry.url || !entry.headers || !Object.keys(entry.headers).length) return;
+    previewHeaderOverrides.set(entry.url, entry.headers);
+  });
+  // Las URLs firmadas de estos sitios son de un solo uso/expiran rápido, así
+  // que no hace falta limpiar activamente al cerrar la preview: alcanza con
+  // no dejar crecer el mapa sin límite, tirando las entradas más viejas.
+  while (previewHeaderOverrides.size > PREVIEW_HEADER_CACHE_LIMIT) {
+    const oldestKey = previewHeaderOverrides.keys().next().value;
+    previewHeaderOverrides.delete(oldestKey);
+  }
+});
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -1057,11 +1253,18 @@ app.on('open-url', (event, url) => {
 });
 
 app.whenReady().then(() => {
+  // Primero que nada: si venís de una versión vieja, mover los datos de la
+  // carpeta con el nombre anterior a la nueva antes de que se cree la
+  // ventana y el renderer empiece a pedir presets/historial/configuración.
+  migrateUserDataFolder();
+
   // El link con el que se abrió la app (si lo hay) se resuelve apenas se
   // crea la ventana, ANTES de tray/servidor/ffmpeg, a propósito: así un
   // fallo en cualquiera de esas otras cosas (ver try/catch abajo) nunca
   // puede volver a bloquear la entrega del link pendiente a la ventana.
   createWindow();
+
+  registerPreviewHeaderInterceptor();
 
   const launchLink = findProtocolLinkInArgv(process.argv);
   if (launchLink) {
@@ -1285,6 +1488,12 @@ ipcMain.handle('presets:add', (_event, preset) => {
 
 ipcMain.handle('presets:delete', (_event, index) => {
   const presets = loadPresets();
+  // Las entradas "builtin" (Mejor video y audio / Mejor audio disponible) no
+  // se pueden eliminar, solo editar. El renderer ya no muestra el botón de
+  // borrar para esas filas, pero se valida también acá por si acaso.
+  if (presets[index] && presets[index].builtin) {
+    return presets;
+  }
   presets.splice(index, 1);
   return savePresetsToDisk(presets);
 });
@@ -1292,7 +1501,11 @@ ipcMain.handle('presets:delete', (_event, index) => {
 ipcMain.handle('presets:update', (_event, index, preset) => {
   const presets = loadPresets();
   if (index >= 0 && index < presets.length) {
-    presets[index] = preset;
+    const existing = presets[index];
+    // Si la entrada editada es una de las dos "builtin", se conserva el
+    // marcador aunque el usuario cambie sitio/nombre/opciones, para que
+    // siga protegida contra borrado después de guardar los cambios.
+    presets[index] = existing && existing.builtin ? { ...preset, builtin: existing.builtin } : preset;
   }
   return savePresetsToDisk(presets);
 });
@@ -1678,10 +1891,17 @@ ipcMain.handle('app:fetch-playlist', async (_event, url) => {
   });
 });
 
-ipcMain.handle('app:download', async (event, { url, formatId, audioOnly, audioFormat, audioBitrateKbps, mergeFormat, presetOptions, title, site, label, videoInfo, thumbnail, outputDir, subfolder, downloadId }) => {
+ipcMain.handle('app:download', async (event, { url, formatId, audioOnly, audioFormat, audioBitrateKbps, mergeFormat, presetOptions, title, site, label, videoInfo, thumbnail, outputDir, subfolder, downloadId, trimSection }) => {
   // Miniatura a guardar en el historial: la que venga explícita en el payload
   // (ej. entradas de playlist) o, si no, la que traiga videoInfo.
   const historyThumbnail = thumbnail || (videoInfo && videoInfo.thumbnail) || null;
+  // Identificador "real" del video (id + extractor) para poder reconocer que
+  // ya se descargó antes aunque el usuario pegue una URL distinta que apunta
+  // al mismo contenido (ej. youtu.be/xxx vs youtube.com/watch?v=xxx). Si no
+  // viene videoInfo (algunos flujos, ej. reintentos), queda en null y el
+  // renderer cae de vuelta a comparar la URL tal cual.
+  const historyVideoId = (videoInfo && videoInfo.id) || null;
+  const historyExtractorKey = (videoInfo && videoInfo.extractor_key) || site || null;
   const { spawn } = require('child_process');
   const ytdlpPath = getYtDlpPath();
   // Si ffmpeg todavía no está en la carpeta administrada (ej. primer uso justo
@@ -1725,28 +1945,40 @@ ipcMain.handle('app:download', async (event, { url, formatId, audioOnly, audioFo
   // no pasarle a yt-dlp/ffmpeg un valor arbitrario; si no viene o no es válido, mp4 por defecto.
   const ALLOWED_CONTAINERS = ['mp4', 'mkv', 'webm', 'mov'];
   const outputContainer = ALLOWED_CONTAINERS.includes(mergeFormat) ? mergeFormat : 'mp4';
-  // webm no soporta carátula incrustada (attached-pic) de forma confiable con ffmpeg;
-  // en ese contenedor se omite --embed-thumbnail para no romper la descarga.
-  const supportsEmbeddedThumbnail = outputContainer !== 'webm';
+  // Subtítulos/miniatura/capítulos según Configuración → Descargas (webm no soporta
+  // carátula incrustada de forma confiable, así que buildMediaExtrasArgs la omite ahí).
+  // "Cortar video" (ver picker de un solo video): descarga solo el tramo pedido en vez del video completo.
+  const trimArgs = buildTrimArgs(trimSection);
+  const videoMediaExtrasArgs = buildMediaExtrasArgs(settings, { audioOnly: false, container: outputContainer, isTrimmed: trimArgs.length > 0 });
+  // true solo si el corte va a re-codificar con ffmpeg (--force-keyframes-at-cuts
+  // está en trimArgs): esa etapa no reporta % real por stdout (ver processStdoutLine),
+  // así que la UI necesita saber que debe mostrar progreso indeterminado en vez de 0%.
+  const isExactTrim = trimArgs.includes('--force-keyframes-at-cuts');
+  // También el corte NO exacto (solo --download-sections, sin re-codificar) puede
+  // tardar en emitir la primera línea "[download] XX.X%" -a veces directamente no
+  // llega ninguna intermedia y salta de 0% a terminado-, así que cualquier descarga
+  // con recorte arranca en modo indeterminado; en cuanto llega un % real se apaga solo.
+  const isTrimmedDownload = trimArgs.length > 0;
 
   let args;
   if (presetOptions) {
     // Preset: la cadena de "Opciones" ya trae los argumentos completos de yt-dlp
     // (ej: "-f bestvideo[...]+bestaudio" o "-f bestaudio --extract-audio ...")
     const presetArgs = presetOptions.trim().split(/\s+/);
-    args = [...presetArgs, ...ffmpegArgs, ...overwriteArgs, ...settingsArgs, '-o', outputTemplate, url];
+    args = [...presetArgs, ...trimArgs, ...ffmpegArgs, ...overwriteArgs, ...settingsArgs, '-o', outputTemplate, url];
   } else if (audioOnly) {
     // Solo audio: fuerza la mejor pista de audio disponible y extrae al formato elegido
     // (mp3 por defecto, o el que haya elegido el usuario en la lista de formatos: m4a, opus, flac, wav...)
     const finalAudioFormat = audioFormat || 'mp3';
-    // WAV es sin pérdida y no soporta portada incrustada de forma fiable; el resto sí.
-    const supportsThumbnail = finalAudioFormat !== 'wav';
     // Nivel de calidad elegido en la IU (Alta/Media/Baja -> bitrate objetivo en kbps).
     // Si no viene ninguno (ej. preajuste "Mejor audio disponible"), se usa la
     // mejor calidad posible ("0" = VBR más alta que soporte ffmpeg).
     const audioQualityArg = Number.isFinite(audioBitrateKbps) && audioBitrateKbps > 0
       ? `${audioBitrateKbps}K`
       : '0';
+    // Subtítulos/miniatura/capítulos según Configuración → Descargas (WAV es sin
+    // pérdida y no soporta portada incrustada de forma fiable, así que se omite ahí).
+    const mediaExtrasArgs = buildMediaExtrasArgs(settings, { audioOnly: true, container: finalAudioFormat, isTrimmed: trimArgs.length > 0 });
     args = [
       '-f',
       'bestaudio',
@@ -1756,7 +1988,8 @@ ipcMain.handle('app:download', async (event, { url, formatId, audioOnly, audioFo
       '--add-metadata',
       '--audio-format',
       finalAudioFormat,
-      ...(supportsThumbnail ? ['--embed-thumbnail'] : []),
+      ...mediaExtrasArgs,
+      ...trimArgs,
       ...ffmpegArgs,
       ...overwriteArgs,
       ...settingsArgs,
@@ -1778,7 +2011,8 @@ ipcMain.handle('app:download', async (event, { url, formatId, audioOnly, audioFo
       ...(isBestOption ? ['--format-sort', 'res,fps,hdr:12,vcodec:vp9.2,acodec,tbr,vbr,abr,size'] : []),
       '--merge-output-format',
       outputContainer,
-      ...(supportsEmbeddedThumbnail ? ['--embed-thumbnail'] : []),
+      ...videoMediaExtrasArgs,
+      ...trimArgs,
       '--add-metadata',
       ...ffmpegArgs,
       ...overwriteArgs,
@@ -1794,7 +2028,8 @@ ipcMain.handle('app:download', async (event, { url, formatId, audioOnly, audioFo
       `${formatId}+bestaudio/best`,
       '--merge-output-format',
       outputContainer,
-      ...(supportsEmbeddedThumbnail ? ['--embed-thumbnail'] : []),
+      ...videoMediaExtrasArgs,
+      ...trimArgs,
       '--add-metadata',
       ...ffmpegArgs,
       ...overwriteArgs,
@@ -1844,6 +2079,17 @@ ipcMain.handle('app:download', async (event, { url, formatId, audioOnly, audioFo
       activeProcs.set(downloadId, proc);
     }
 
+    // Corte (exacto o no): hasta que llegue la primera línea "[download] XX.X%"
+    // real (si es que llega) se muestra progreso indeterminado en vez de un 0%
+    // que parece colgado. processStdoutLine lo apaga solo en cuanto ve un % real.
+    if (isTrimmedDownload && downloadId !== undefined && downloadId !== null && mainWindow) {
+      mainWindow.webContents.send('app:progress', {
+        id: downloadId,
+        indeterminate: true,
+        indeterminateLabelKey: isExactTrim ? 'status_trimming' : 'status_trimming_section',
+      });
+    }
+
     // Node entrega el stdout de yt-dlp en bloques que no respetan los saltos
     // de línea: un mismo "chunk" puede traer varias líneas juntas (ej. la
     // "Destination:" del audio y la del video seguidas), o cortar una línea
@@ -1868,6 +2114,7 @@ ipcMain.handle('app:download', async (event, { url, formatId, audioOnly, audioFo
           percent: parseFloat(percentMatch[1]),
           speed: speedMatch ? speedMatch[1] : null,
           eta: etaMatch ? etaMatch[1] : null,
+          indeterminate: false,
         });
       }
 
@@ -1927,6 +2174,8 @@ ipcMain.handle('app:download', async (event, { url, formatId, audioOnly, audioFo
           site: site || '',
           label: label || '',
           thumbnail: historyThumbnail,
+          videoId: historyVideoId,
+          extractorKey: historyExtractorKey,
         });
         // Respaldo 1: recorre la carpeta de destino por si algún ".part"/".ytdl"
         // no se detectó vía stdout (ej. por el problema de codificación de arriba).
@@ -1956,6 +2205,8 @@ ipcMain.handle('app:download', async (event, { url, formatId, audioOnly, audioFo
           label: label || '',
           error: errorMessage,
           thumbnail: historyThumbnail,
+          videoId: historyVideoId,
+          extractorKey: historyExtractorKey,
         });
         return reject(new Error(errorMessage));
       }
@@ -1970,6 +2221,8 @@ ipcMain.handle('app:download', async (event, { url, formatId, audioOnly, audioFo
         label: label || '',
         path: finalPath,
         thumbnail: historyThumbnail,
+        videoId: historyVideoId,
+        extractorKey: historyExtractorKey,
       });
       resolve({ path: finalPath });
     });
