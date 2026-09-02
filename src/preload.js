@@ -26,6 +26,12 @@ contextBridge.exposeInMainWorld('yoinksAPI', {
   // sin romper nada (ver 'lastAppliedExtensionUrl' en renderer.js).
   onExtensionUrl: (callback) =>
     ipcRenderer.on('extension:url', (_event, url) => callback(url)),
+  // Igual que 'extension:url', pero para cuando el usuario ya eligió una
+  // calidad en el popup o el botón flotante del navegador: en vez de solo
+  // pegar el link, la app arranca la descarga directo con esa calidad (ver
+  // handleUrlFromExtension en main.js y applyExtensionDownload en renderer.js).
+  onExtensionDownload: (callback) =>
+    ipcRenderer.on('extension:download', (_event, payload) => callback(payload)),
   // Confirma que el link ya se aplicó (se pegó en el input y se disparó la
   // búsqueda), para que main.js deje de reenviarlo.
   ackExtensionUrl: () => ipcRenderer.send('extension:url-ack'),
@@ -33,7 +39,10 @@ contextBridge.exposeInMainWorld('yoinksAPI', {
   // hizo clic en "Descargar" en la extensión sin tener la app abierta, y
   // el navegador la abrió vía el protocolo ytdlpminimalist://). Se consulta
   // una sola vez al arrancar, en vez de depender de que main.js le mande el
-  // evento 'extension:url' justo a tiempo (ver comentario en main.js).
+  // evento 'extension:url'/'extension:download' justo a tiempo (ver
+  // comentario en main.js). Devuelve null si no había nada pendiente, o
+  // { url, quality } — "quality" es null si el link no traía una calidad
+  // ya elegida.
   getPendingExtensionUrl: () => ipcRenderer.invoke('extension:get-pending-url'),
 
   // Diálogo "¿Qué querés hacer?" al presionar ✕ (closeBehavior = 'ask').
@@ -74,6 +83,11 @@ contextBridge.exposeInMainWorld('yoinksAPI', {
   getSettings: () => ipcRenderer.invoke('settings:get'),
   saveSettings: (settings) => ipcRenderer.invoke('settings:save', settings),
   resetSettings: () => ipcRenderer.invoke('settings:reset'),
+  // Avisa cuando el toggle "Mantener en segundo plano" cambió desde la
+  // extensión del navegador (Opciones), para reflejarlo al instante en el
+  // panel General si está abierto (ver settings:extension-updated en main.js).
+  onExtensionSettingsUpdated: (callback) =>
+    ipcRenderer.on('settings:extension-updated', (_event, data) => callback(data)),
   setLanguage: (lang) => ipcRenderer.send('language:set', lang),
   selectDownloadFolder: () => ipcRenderer.invoke('dialog:select-folder'),
   selectCookiesFile: (site) => ipcRenderer.invoke('dialog:select-cookies-file', site),

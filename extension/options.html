@@ -72,32 +72,71 @@
     #saved.show {
       opacity: 1;
     }
+    #sync-hint {
+      margin-top: 10px;
+      font-size: 12px;
+      color: #d0a24c;
+      opacity: 0;
+      transition: opacity 0.2s ease;
+    }
+    #sync-hint.show {
+      opacity: 1;
+    }
   </style>
 </head>
 <body>
   <h1>YT-DLP Minimalist</h1>
-  <p class="subtitle">Elegí cómo se ve el botón flotante que aparece sobre los videos.</p>
+  <p class="subtitle" data-i18n="options_subtitle">Elegí cómo se ve el botón flotante que aparece sobre los videos.</p>
 
   <fieldset>
-    <legend>Botón flotante</legend>
+    <legend data-i18n="settings_overlay_legend">Botón flotante</legend>
     <label class="option">
       <input type="radio" name="mode" value="icon" />
       <span class="option-text">
-        <span class="option-title">Solo ícono (compacto)</span>
-        <span class="option-desc">50×20px, pegado a la esquina del video.</span>
+        <span class="option-title" data-i18n="overlay_icon_title">Solo ícono (compacto)</span>
+        <span class="option-desc" data-i18n="overlay_icon_desc">50×20px, pegado a la esquina del video.</span>
       </span>
     </label>
     <label class="option">
       <input type="radio" name="mode" value="text" />
       <span class="option-text">
-        <span class="option-title">Ícono + texto "Descargar"</span>
-        <span class="option-desc">Más visible, con el texto al lado del ícono.</span>
+        <span class="option-title" data-i18n="overlay_text_title">Ícono + texto "Descargar"</span>
+        <span class="option-desc" data-i18n="overlay_text_desc">Más visible, con el texto al lado del ícono.</span>
       </span>
     </label>
   </fieldset>
 
-  <div id="saved">Guardado ✓</div>
+  <fieldset style="margin-top: 14px;">
+    <legend data-i18n="settings_downloads_legend">Descargas desde la extensión</legend>
+    <label class="option">
+      <input type="checkbox" id="keep-in-background" />
+      <span class="option-text">
+        <span class="option-title" data-i18n="keep_app_in_background_title">Mantener la app en segundo plano</span>
+        <span class="option-desc" data-i18n="keep_app_in_background_desc">Si ya elegiste la calidad acá (popup o botón flotante), la descarga arranca sin traer la ventana de la app al frente. Es el mismo ajuste que hay en la app (Configuración → General): cambiarlo de cualquiera de los dos lados actualiza el otro.</span>
+      </span>
+    </label>
+  </fieldset>
 
+  <fieldset style="margin-top: 14px;">
+    <legend data-i18n="settings_language_legend">Idioma</legend>
+    <label class="option">
+      <input type="radio" name="language" value="es" />
+      <span class="option-text">
+        <span class="option-title" data-i18n="language_es">Español</span>
+      </span>
+    </label>
+    <label class="option">
+      <input type="radio" name="language" value="en" />
+      <span class="option-text">
+        <span class="option-title" data-i18n="language_en">English</span>
+      </span>
+    </label>
+  </fieldset>
+
+  <div id="saved" data-i18n="saved_label">Guardado ✓</div>
+  <div id="sync-hint" data-i18n="sync_hint">No se pudo sincronizar con la app — abrila para que este ajuste quede igual en los dos lados.</div>
+
+  <script src="i18n.js"></script>
   <script src="options.js"></script>
 </body>
 </html>

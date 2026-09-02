@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "YT-DLP Minimalist — Enviar video",
-  "version": "1.0.0",
+  "version": "1.0.3",
   "description": "Envía la URL de la pestaña actual a YT-DLP Minimalist para descargarla con yt-dlp.",
   "action": {
     "default_popup": "popup.html",
@@ -19,10 +19,13 @@
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
   },
-  "permissions": ["activeTab", "storage"],
+  "permissions": ["activeTab", "storage", "sidePanel"],
   "host_permissions": ["http://127.0.0.1:14370/*"],
   "background": {
     "service_worker": "background.js"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
   },
   "options_ui": {
     "page": "options.html",
@@ -31,7 +34,7 @@
   "content_scripts": [
     {
       "matches": ["http://*/*", "https://*/*"],
-      "js": ["url-utils.js", "content-overlay.js"],
+      "js": ["url-utils.js", "i18n.js", "content-overlay.js"],
       "css": ["content-overlay.css"],
       "run_at": "document_idle"
     }

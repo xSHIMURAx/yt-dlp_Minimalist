@@ -25,7 +25,7 @@ function resolveAssetPath(...segments) {
 const os = require('os');
 const fs = require('fs');
 const https = require('https');
-const { startExtensionServer } = require('./extension-server');
+const { startExtensionServer, sanitizeQuality, sanitizeExtId } = require('./extension-server');
 
 // ---- Cifrado de cookies en disco ----
 // Las cookies (login dentro de la app o archivos cookies.txt elegidos por el
@@ -162,6 +162,37 @@ function deleteNewFilesSince(dir, preExistingFiles, attempt = 0) {
   }
 }
 
+// Respaldo para cuando la descarga TERMINÓ BIEN pero destinationPath (lo
+// parseado del stdout de yt-dlp) no coincide con el archivo real en disco
+// — el mismo problema de codificación con títulos no-ASCII que ya se
+// documentó arriba (ver PYTHONIOENCODING más abajo), pero que hasta ahora
+// solo tenía respaldo para el caso de cancelar (deleteNewFilesSince). Si el
+// archivo en destinationPath no existe, se compara la carpeta antes/después
+// para encontrar el archivo nuevo real, ignorando restos parciales
+// (.part/.ytdl) y la miniatura (que no es el archivo principal).
+function findFallbackFinalFile(dir, preExistingFiles, excludePaths) {
+  const postFiles = snapshotDirFiles(dir);
+  const exclude = new Set((excludePaths || []).filter(Boolean));
+  const PARTIAL_EXTENSIONS = new Set(['.part', '.ytdl']);
+  let best = null;
+  let bestMtime = -Infinity;
+  for (const full of postFiles) {
+    if (preExistingFiles.has(full)) continue; // ya estaba antes de esta descarga
+    if (exclude.has(full)) continue; // ej. la miniatura, ya rastreada aparte
+    if (PARTIAL_EXTENSIONS.has(path.extname(full).toLowerCase())) continue;
+    try {
+      const stat = fs.statSync(full);
+      if (stat.mtimeMs > bestMtime) {
+        bestMtime = stat.mtimeMs;
+        best = full;
+      }
+    } catch (e) {
+      // el archivo pudo desaparecer entre el readdir y el stat; se ignora
+    }
+  }
+  return best;
+}
+
 // Respaldo de deletePartialDownloadFiles: en vez de confiar en las rutas
 // parseadas del stdout de yt-dlp (que pueden llegar corruptas si el título
 // tiene caracteres no-ASCII, ver PYTHONIOENCODING más abajo), recorre
@@ -208,6 +239,103 @@ let isQuitting = false;
 // Procesos de yt-dlp en ejecución, indexados por downloadId, para poder
 // pausarlos o cancelarlos desde el panel de "Descargas en curso".
 const activeProcs = new Map();
+
+// ---- Progreso de descargas iniciadas desde la extensión del navegador ----
+// El popup de la extensión no tiene forma de "escuchar" al proceso de
+// yt-dlp directamente (corre en otro programa, la app de escritorio). En
+// vez de eso, cada descarga que llega vía /add-url recibe acá un id propio
+// (ver handleUrlFromExtension) y este Map guarda su estado más reciente
+// (porcentaje, velocidad, ruta final, etc). El servidor local
+// (extension-server.js) expone ese estado por HTTP para que el popup lo
+// vaya consultando mientras está abierto.
+const extensionDownloads = new Map();
+// Guarda las opciones completas ({url, formatId, outputDir, ...}) con las que
+// arrancó cada descarga pedida desde la extensión, indexadas por extId. Se
+// usan para poder reanudarla (resumeDownloadById) sin depender del renderer:
+// el popup de la extensión solo conoce el extId, nunca el estado interno de
+// activeDownloads del renderer.
+const extensionDownloadOpts = new Map();
+// Timers de limpieza para no dejar crecer extensionDownloads sin límite si
+// el usuario nunca vuelve a abrir el popup a revisar el resultado.
+const extensionDownloadCleanupTimers = new Map();
+const EXTENSION_DOWNLOAD_TTL_MS = 30 * 60 * 1000; // 30 minutos
+
+function setExtensionDownload(id, patch) {
+  if (!id) return;
+  const current = extensionDownloads.get(id) || {};
+  extensionDownloads.set(id, { ...current, ...patch, updatedAt: Date.now() });
+
+  // Reprograma la limpieza cada vez que el estado cambia, así una descarga
+  // larga no se borra a mitad de camino.
+  const prevTimer = extensionDownloadCleanupTimers.get(id);
+  if (prevTimer) clearTimeout(prevTimer);
+  const timer = setTimeout(() => {
+    extensionDownloads.delete(id);
+    extensionDownloadCleanupTimers.delete(id);
+  }, EXTENSION_DOWNLOAD_TTL_MS);
+  extensionDownloadCleanupTimers.set(id, timer);
+}
+
+function getExtensionDownload(id) {
+  if (!id) return null;
+  return extensionDownloads.get(id) || null;
+}
+
+// Abre un archivo por su ruta absoluta directamente (sin pasar por el Map
+// extensionDownloads en memoria). Se usa desde la pestaña Historial de la
+// extensión: esas entradas guardan la ruta final tal cual la vio el popup
+// en su momento, y siguen ahí aunque la app se haya reiniciado desde
+// entonces (a diferencia de extensionDownloads, que es efímero y se limpia
+// solo a los 30 minutos — ver EXTENSION_DOWNLOAD_TTL_MS).
+function openFileByPath(filePath) {
+  if (!filePath || typeof filePath !== 'string') return { ok: false, error: 'missing_path' };
+  if (!fs.existsSync(filePath)) return { ok: false, error: 'missing' };
+  shell.openPath(filePath);
+  return { ok: true };
+}
+
+// Igual que openFileByPath, pero para abrir (y seleccionar, cuando se puede)
+// la carpeta contenedora. Si la ruta del archivo ya no existe, cae a la
+// carpeta sola (por si el archivo se movió/renombró pero la carpeta sigue).
+function openFolderByPath(filePath, folderPath) {
+  if (filePath && fs.existsSync(filePath)) {
+    shell.showItemInFolder(filePath);
+    return { ok: true };
+  }
+  const folder = folderPath || (filePath ? path.dirname(filePath) : null);
+  if (folder && fs.existsSync(folder)) {
+    shell.openPath(folder);
+    return { ok: true };
+  }
+  return { ok: false, error: 'missing' };
+}
+
+// Abre el archivo final de una descarga iniciada desde la extensión (doble
+// clic virtual: lo lanza con la app que el sistema tenga asociada a esa
+// extensión, ej. el reproductor de video por defecto).
+function openExtensionDownloadFile(id) {
+  const entry = getExtensionDownload(id);
+  if (!entry || !entry.path) return { ok: false, error: 'not_found' };
+  if (!fs.existsSync(entry.path)) return { ok: false, error: 'missing' };
+  shell.openPath(entry.path);
+  return { ok: true };
+}
+
+// Abre (y selecciona, cuando es posible) la carpeta donde quedó el archivo.
+function openExtensionDownloadFolder(id) {
+  const entry = getExtensionDownload(id);
+  if (!entry) return { ok: false, error: 'not_found' };
+  if (entry.path && fs.existsSync(entry.path)) {
+    shell.showItemInFolder(entry.path);
+    return { ok: true };
+  }
+  const folder = entry.folder || (entry.path ? path.dirname(entry.path) : null);
+  if (folder && fs.existsSync(folder)) {
+    shell.openPath(folder);
+    return { ok: true };
+  }
+  return { ok: false, error: 'missing' };
+}
 
 // Mata un proceso y TODO su árbol de descendientes. Es necesario porque en
 // Windows el "yt-dlp.exe" que se descarga es un ejecutable de PyInstaller
@@ -323,6 +451,7 @@ function getDefaultSettings() {
   return {
     downloadPath: path.join(os.homedir(), 'Downloads'),
     outputTemplate: '%(title).200B - %(uploader).30B.%(ext)s',
+    organizeBySite: false, // si está prendido, cada descarga se guarda dentro de una subcarpeta con el nombre del sitio (ej. Youtube, TikTok) dentro de downloadPath
     // Cookies por sitio: cada sitio (youtube/tiktok/instagram/twitter/threads/bilibili/other)
     // tiene su propio modo, para que la app elija automáticamente según el link pegado
     // en vez de un único modo global para toda la app.
@@ -336,11 +465,12 @@ function getDefaultSettings() {
     subtitleMode: 'embed', // 'embed' = incrustados en el video | 'file' = archivo .srt aparte | 'both' = ambos
     thumbnailsEnabled: true, // incrustar la miniatura como carátula (--embed-thumbnail) — comportamiento histórico de la app
     chaptersEnabled: false, // incrustar los capítulos del video (--embed-chapters)
-    ytdlpChannel: 'nightly', // 'stable' | 'nightly' — de qué repo de GitHub se baja/compara yt-dlp
+    ytdlpChannel: 'stable', // 'stable' | 'nightly' — de qué repo de GitHub se baja/compara yt-dlp
     soundEnabled: true, // sonido al terminar una descarga o la instalación automática de dependencias
     soundStyle: 'chime', // 'chime' (campanita, dos notas) | 'windows' (pitido del sistema, shell.beep)
     closeBehavior: 'ask', // 'ask' | 'minimize' | 'close' — qué hacer al presionar el botón ✕ de la ventana
     language: detectSystemLanguage(), // 'es' | 'en' — idioma de la interfaz
+    extensionKeepInBackground: true, // si está activo, una descarga mandada desde la extensión con calidad ya elegida NO trae la ventana al frente (sigue minimizada/en la bandeja si ya lo estaba)
   };
 }
 
@@ -498,6 +628,7 @@ function loadSettings() {
     merged.rateLimitMode = merged.rateLimitMode === 'total' ? 'total' : 'perFile';
     merged.subtitleMode = ['file', 'both'].includes(merged.subtitleMode) ? merged.subtitleMode : 'embed';
     merged.soundStyle = merged.soundStyle === 'windows' ? 'windows' : 'chime';
+    merged.extensionKeepInBackground = merged.extensionKeepInBackground === true;
     return merged;
   } catch (e) {
     return defaults;
@@ -518,6 +649,35 @@ function saveSettingsToDisk(settings) {
   merged.soundStyle = merged.soundStyle === 'windows' ? 'windows' : 'chime';
   fs.writeFileSync(getSettingsPath(), JSON.stringify(merged, null, 2), 'utf-8');
   return merged;
+}
+
+// ---- Ajustes que la extensión del navegador puede leer/escribir directo,
+// sin pasar por el panel General de la app (ver /settings en
+// extension-server.js) ----
+
+// Le da a la extensión SOLO los ajustes que le interesan (no todo
+// settings.json) cuando abre su página de Opciones, para que el checkbox
+// "Mantener la app en segundo plano" ahí arranque siempre con el valor real
+// guardado por la app, sin importar desde dónde se haya tocado la última vez.
+function getSettingsForExtension() {
+  return { extensionKeepInBackground: loadSettings().extensionKeepInBackground === true };
+}
+
+// El usuario cambió el toggle desde las Opciones de la extensión: lo
+// persistimos exactamente igual que si se hubiera guardado desde el panel
+// General de la app (mismo settings.json, mismas validaciones de
+// saveSettingsToDisk). Si la ventana principal está abierta le avisamos por
+// IPC para que, si el panel General está visible en ese momento, el
+// checkbox se actualice solo — sin pisar el resto de campos que el usuario
+// pueda tener sin guardar todavía en ese mismo panel (ver el listener de
+// 'settings:extension-updated' en renderer.js, que solo toca ese checkbox).
+function updateSettingsFromExtension(patch) {
+  const current = loadSettings();
+  const merged = saveSettingsToDisk({ ...current, extensionKeepInBackground: !!patch.extensionKeepInBackground });
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('settings:extension-updated', { extensionKeepInBackground: merged.extensionKeepInBackground });
+  }
+  return { extensionKeepInBackground: merged.extensionKeepInBackground };
 }
 
 // Detecta a qué sitio (de los que tienen configuración de cookies propia)
@@ -877,6 +1037,30 @@ ipcMain.handle('login:logout', async (_event, site) => {
 });
 
 
+// Nombre de subcarpeta por sitio (usado cuando settings.organizeBySite está
+// prendido). Prioriza el "site"/extractor_key que ya trae la descarga (ej.
+// "Youtube", "TikTok"); si no hay ninguno (ej. algún flujo viejo sin
+// videoInfo), intenta sacarlo del hostname de la URL como último recurso.
+// Siempre devuelve un nombre de carpeta válido (nunca vacío).
+function getSiteFolderName(site, videoInfo, url) {
+  let raw = (site || (videoInfo && videoInfo.extractor_key) || '').trim();
+  if (!raw && url) {
+    try {
+      const host = new URL(url).hostname.replace(/^www\./, '');
+      const label = host.split('.')[0];
+      raw = label ? label.charAt(0).toUpperCase() + label.slice(1) : '';
+    } catch (e) {
+      raw = '';
+    }
+  }
+  const cleaned = raw
+    .replace(/[<>:"/\\|?*\x00-\x1F]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/[. ]+$/, '');
+  return cleaned || 'Otros';
+}
+
 function sanitizeFolderName(name) {
   const cleaned = name
     .replace(/[<>:"/\\|?*\x00-\x1F]/g, '')
@@ -998,7 +1182,15 @@ ipcMain.handle('preview:set-headers', (_event, entries) => {
   }
 });
 
-function createWindow() {
+// startHidden: true cuando la app se abre en frío por una descarga de la
+// extensión con calidad ya elegida y "Mantener en segundo plano" activo (ver
+// app.whenReady() más abajo, donde se calcula). En ese caso la ventana se
+// crea sin mostrarse (show:false) y se queda así — nadie llama a .show()
+// para ella (handleUrlFromExtension tampoco lo hace, con esa misma
+// combinación de calidad+setting), igual que si el usuario la hubiera
+// minimizado a la bandeja a mano. El ícono de la bandeja (ver createTray)
+// sigue permitiendo restaurarla en cualquier momento.
+function createWindow(startHidden) {
   mainWindow = new BrowserWindow({
     width: 950,
     height: 625,
@@ -1007,6 +1199,7 @@ function createWindow() {
     backgroundColor: '#0d0d0d',
     frame: false, // quitamos el marco nativo para dibujar nuestra propia "barra de título" tipo terminal
     titleBarStyle: 'hidden',
+    show: !startHidden,
     icon: resolveAssetPath('assets', 'icon.ico'), // 'icon.png' no existe en assets/, solo 'icon.ico'
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -1122,15 +1315,40 @@ function refreshTrayLanguage(lang) {
 }
 
 // Recibe una URL enviada desde la extensión del navegador, trae la ventana
-// al frente y se la pasa al renderer para que dispare el mismo flujo que
-// usa cuando el usuario pega un link a mano (ver 'extension:url' en preload.js
-// y renderer.js).
-function handleUrlFromExtension(url) {
+// al frente y se la pasa al renderer. Si la extensión ya mandó una calidad
+// elegida (el usuario la seleccionó en el popup o en el botón flotante),
+// dispara el mismo flujo que el picker interno de la app pero sin mostrarlo
+// — descarga directo, como el selector de IDM. Si no vino calidad (o es una
+// versión vieja de la extensión), se comporta como siempre: solo pega el
+// link y deja que el usuario elija en el picker (ver 'extension:url' /
+// 'extension:download' en preload.js y renderer.js).
+function handleUrlFromExtension(url, title, quality, extId) {
   if (!mainWindow) return;
-  if (mainWindow.isMinimized()) mainWindow.restore();
-  mainWindow.show();
-  mainWindow.focus();
-  mainWindow.webContents.send('extension:url', url);
+  // Con calidad ya elegida (viene del popup de la extensión, no del botón
+  // flotante sin calidad) y el toggle "Mantener en segundo plano" activo,
+  // no traemos la ventana al frente: la descarga arranca igual, pero la app
+  // se queda minimizada/en la bandeja como estaba. Sin calidad (hay que
+  // elegir en el picker) siempre mostramos la ventana, porque si no el
+  // usuario no tiene forma de elegir.
+  const keepInBackground = quality && loadSettings().extensionKeepInBackground;
+  if (!keepInBackground) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+  }
+  if (quality) {
+    // extId: id que generó extension-server.js para este pedido (solo en
+    // pedidos que vienen del servidor HTTP, no del link de protocolo en
+    // frío). Con él, el popup de la extensión puede consultar el progreso
+    // de ESTA descarga puntual vía GET /progress?id=... — ver setExtensionDownload
+    // más abajo y processStdoutLine en 'app:download'.
+    if (extId) {
+      setExtensionDownload(extId, { status: 'starting', title: title || url, url, percent: 0 });
+    }
+    mainWindow.webContents.send('extension:download', { url, title: title || '', quality, extId: extId || null });
+  } else {
+    mainWindow.webContents.send('extension:url', url);
+  }
 }
 
 // Entrega "a prueba de balas" del link con el que la app se lanzó en frío
@@ -1141,8 +1359,15 @@ function handleUrlFromExtension(url) {
 // etc.), y la app abría vacía. Ahora en cambio reintentamos mandar el
 // mismo link cada 400ms hasta que el renderer confirma por IPC que lo
 // aplicó ('extension:url-ack'), o hasta agotar los reintentos.
-function startPendingUrlDelivery(url) {
+// "quality" es opcional (ver extractQualityFromProtocolLink más abajo, donde
+// se llama esta función): con ella, cada reintento manda 'extension:download'
+// en vez de 'extension:url', así el renderer arranca la descarga directo en
+// cuanto atrapa alguno de los reintentos, en vez de solo pegar el link y
+// esperar a que el usuario elija calidad de nuevo.
+function startPendingUrlDelivery(url, quality, extId) {
   pendingExtensionUrl = url;
+  pendingExtensionQuality = quality || null;
+  pendingExtensionExtId = extId || null;
   if (pendingUrlRetryTimer) clearInterval(pendingUrlRetryTimer);
 
   let attempts = 0;
@@ -1155,7 +1380,7 @@ function startPendingUrlDelivery(url) {
       pendingUrlRetryTimer = null;
       return;
     }
-    handleUrlFromExtension(pendingExtensionUrl);
+    handleUrlFromExtension(pendingExtensionUrl, '', pendingExtensionQuality, pendingExtensionExtId);
     if (attempts >= MAX_ATTEMPTS) {
       clearInterval(pendingUrlRetryTimer);
       pendingUrlRetryTimer = null;
@@ -1182,6 +1407,14 @@ const PROTOCOL_SCHEME = 'ytdlpminimalist';
 // renderer a veces perdía el link (la app abría, pero no se agregaba nada,
 // y había que reenviarlo desde la extensión con la app ya corriendo).
 let pendingExtensionUrl = null;
+// Calidad (si la había) del mismo link pendiente — ver
+// extractQualityFromProtocolLink y startPendingUrlDelivery más abajo. Viaja
+// junto a pendingExtensionUrl y se limpia en los mismos puntos que esa.
+let pendingExtensionQuality = null;
+// Id (si lo había) del mismo link pendiente — ver
+// extractExtIdFromProtocolLink más arriba. Igual que pendingExtensionQuality,
+// viaja junto a pendingExtensionUrl y se limpia en los mismos puntos.
+let pendingExtensionExtId = null;
 // Timer de reintentos del link pendiente (ver más abajo, junto a
 // 'extension:url-ack'). Se limpia apenas el renderer confirma que ya lo
 // aplicó, o después de agotar los reintentos.
@@ -1207,6 +1440,50 @@ function extractUrlFromProtocolLink(link) {
   }
 }
 
+// Cuando el link de protocolo viene de un pedido con calidad ya elegida
+// (popup o botón flotante de la extensión, cayendo a este link porque la
+// app no estaba abierta — ver buildProtocolUrl en url-utils.js de la
+// extensión), trae además "&quality=<json codificado>". sanitizeQuality
+// (compartida con extension-server.js, misma validación que usa POST
+// /add-url) descarta cualquier valor con forma inesperada devolviendo null,
+// que es exactamente "sin calidad elegida" — así una extensión vieja (que
+// no manda este param) o con un valor corrompido nunca rompe el flujo, solo
+// hace que la app muestre su propio selector como antes.
+function extractQualityFromProtocolLink(link) {
+  if (!link || !link.startsWith(`${PROTOCOL_SCHEME}://`)) return null;
+  try {
+    const parsed = new URL(link);
+    const encoded = parsed.searchParams.get('quality');
+    if (!encoded) return null;
+    return sanitizeQuality(JSON.parse(decodeURIComponent(encoded)));
+  } catch (e) {
+    return null;
+  }
+}
+
+// El id (generado del lado del navegador — ver generateClientDownloadId en
+// background.js de la extensión) con el que el popup ya empezó a sondear
+// GET /progress apenas lo generó, antes incluso de intentar el POST por
+// HTTP. Viaja también acá para que, al abrirse en frío, la app registre
+// esta descarga con ESE MISMO id (ver setExtensionDownload en
+// handleUrlFromExtension) — así el sondeo que ya estaba corriendo del lado
+// del popup encuentra la descarga apenas la app abre, sin depender de
+// ninguna respuesta HTTP que en este camino nunca llegó. sanitizeExtId
+// (misma validación que usa POST /add-url) descarta cualquier valor con
+// forma inesperada devolviendo null, que main.js ya trata como "sin id" en
+// todos lados.
+function extractExtIdFromProtocolLink(link) {
+  if (!link || !link.startsWith(`${PROTOCOL_SCHEME}://`)) return null;
+  try {
+    const parsed = new URL(link);
+    const raw = parsed.searchParams.get('extId');
+    if (!raw) return null;
+    return sanitizeExtId(raw);
+  } catch (e) {
+    return null;
+  }
+}
+
 // Busca un link "ytdlpminimalist://..." entre los argumentos con los que se
 // lanzó el proceso (Windows se los pasa como argv al abrir el protocolo).
 function findProtocolLinkInArgv(argv) {
@@ -1220,7 +1497,18 @@ function findProtocolLinkInArgv(argv) {
 
 function handleProtocolLink(link) {
   const url = extractUrlFromProtocolLink(link);
-  if (url) handleUrlFromExtension(url);
+  if (url) {
+    handleUrlFromExtension(url, '', extractQualityFromProtocolLink(link), extractExtIdFromProtocolLink(link));
+    return;
+  }
+  // Link sin URL real (ej. "ytdlpminimalist://open", que dispara el botón
+  // "Abrir programa" de la extensión): no hay nada que descargar, solo
+  // traemos la ventana al frente si la app ya estaba corriendo.
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+  }
 }
 
 // Solo una instancia de la app a la vez: si el usuario dispara el protocolo
@@ -1258,19 +1546,37 @@ app.whenReady().then(() => {
   // ventana y el renderer empiece a pedir presets/historial/configuración.
   migrateUserDataFolder();
 
+  // Resolvemos el link de arranque en frío ANTES de crear la ventana (y no
+  // después, como antes) porque necesitamos saber ya en este punto si hay
+  // que arrancar oculta: BrowserWindow se muestra solo apenas se crea (por
+  // default show:true), así que decidir esto más tarde —dentro de
+  // handleUrlFromExtension, como con la app ya abierta— llegaba demasiado
+  // tarde: la ventana ya se había mostrado un instante antes de que el
+  // renderer llegara a procesar la descarga. Con calidad ya elegida (ver
+  // extractQualityFromProtocolLink) Y el toggle "Mantener en segundo plano"
+  // activo, la creamos directamente oculta (ver 'show' en createWindow).
+  const launchLink = findProtocolLinkInArgv(process.argv);
+  const launchUrl = launchLink ? extractUrlFromProtocolLink(launchLink) : null;
+  const launchQuality = launchUrl ? extractQualityFromProtocolLink(launchLink) : null;
+  const launchExtId = launchUrl ? extractExtIdFromProtocolLink(launchLink) : null;
+  let startHidden = false;
+  if (launchQuality) {
+    try {
+      startHidden = !!loadSettings().extensionKeepInBackground;
+    } catch (e) {
+      startHidden = false;
+    }
+  }
+
   // El link con el que se abrió la app (si lo hay) se resuelve apenas se
   // crea la ventana, ANTES de tray/servidor/ffmpeg, a propósito: así un
   // fallo en cualquiera de esas otras cosas (ver try/catch abajo) nunca
   // puede volver a bloquear la entrega del link pendiente a la ventana.
-  createWindow();
+  createWindow(startHidden);
 
   registerPreviewHeaderInterceptor();
 
-  const launchLink = findProtocolLinkInArgv(process.argv);
-  if (launchLink) {
-    const url = extractUrlFromProtocolLink(launchLink);
-    if (url) startPendingUrlDelivery(url);
-  }
+  if (launchUrl) startPendingUrlDelivery(launchUrl, launchQuality, launchExtId);
 
   try {
     migrateLegacyCookieFiles();
@@ -1291,7 +1597,18 @@ app.whenReady().then(() => {
   }
 
   try {
-    startExtensionServer(handleUrlFromExtension);
+    startExtensionServer(handleUrlFromExtension, {
+      getStatus: getExtensionDownload,
+      openFile: openExtensionDownloadFile,
+      openFolder: openExtensionDownloadFolder,
+      pause: pauseDownloadById,
+      resume: resumeDownloadById,
+      cancel: cancelDownloadById,
+      openFileByPath,
+      openFolderByPath,
+      getSettings: getSettingsForExtension,
+      updateSettings: updateSettingsFromExtension,
+    });
   } catch (e) {
     console.error('[main] Error en startExtensionServer:', e);
   }
@@ -1333,19 +1650,26 @@ app.on('before-quit', () => {
 // limpia en el mismo llamado para no volver a aplicarlo dos veces (ej. si
 // el usuario recarga la ventana con Ctrl+R).
 ipcMain.handle('extension:get-pending-url', () => {
-  const url = pendingExtensionUrl;
+  const payload = pendingExtensionUrl
+    ? { url: pendingExtensionUrl, quality: pendingExtensionQuality, extId: pendingExtensionExtId }
+    : null;
   pendingExtensionUrl = null;
+  pendingExtensionQuality = null;
+  pendingExtensionExtId = null;
   if (pendingUrlRetryTimer) {
     clearInterval(pendingUrlRetryTimer);
     pendingUrlRetryTimer = null;
   }
-  return url;
+  return payload;
 });
 
 // El renderer confirma que ya aplicó el link (lo pegó en el input y
-// disparó la búsqueda de formatos): dejamos de reenviarlo por 'extension:url'.
+// disparó la búsqueda de formatos, o —si traía calidad— ya arrancó la
+// descarga): dejamos de reenviarlo por 'extension:url'/'extension:download'.
 ipcMain.on('extension:url-ack', () => {
   pendingExtensionUrl = null;
+  pendingExtensionQuality = null;
+  pendingExtensionExtId = null;
   if (pendingUrlRetryTimer) {
     clearInterval(pendingUrlRetryTimer);
     pendingUrlRetryTimer = null;
@@ -1891,7 +2215,15 @@ ipcMain.handle('app:fetch-playlist', async (_event, url) => {
   });
 });
 
-ipcMain.handle('app:download', async (event, { url, formatId, audioOnly, audioFormat, audioBitrateKbps, mergeFormat, presetOptions, title, site, label, videoInfo, thumbnail, outputDir, subfolder, downloadId, trimSection }) => {
+// Hace la descarga real con yt-dlp. Extraída a función aparte (en vez de vivir
+// solo adentro del handler IPC) para que resumeDownloadById pueda invocarla de
+// nuevo con las mismas opciones cuando la extensión pide reanudar una
+// descarga pausada, sin pasar por el renderer.
+async function performDownload({ url, formatId, audioOnly, audioFormat, audioBitrateKbps, mergeFormat, presetOptions, title, site, label, videoInfo, thumbnail, outputDir, subfolder, downloadId, trimSection, extId }) {
+  // Reporta progreso/estado de esta descarga a extensionDownloads (si vino
+  // de la extensión, es decir si trae extId) además de a la ventana
+  // principal como siempre. No hace nada si extId es null/undefined.
+  const reportExt = (patch) => { if (extId) setExtensionDownload(extId, patch); };
   // Miniatura a guardar en el historial: la que venga explícita en el payload
   // (ej. entradas de playlist) o, si no, la que traiga videoInfo.
   const historyThumbnail = thumbnail || (videoInfo && videoInfo.thumbnail) || null;
@@ -1923,6 +2255,12 @@ ipcMain.handle('app:download', async (event, { url, formatId, audioOnly, audioFo
     : (settings.downloadPath && settings.downloadPath.trim()
         ? settings.downloadPath
         : path.join(os.homedir(), 'Downloads'));
+  // Subcarpeta por sitio (opcional, Configuración → Descargas → "Organizar en
+  // subcarpetas por sitio"): va primero, así que si también hay subcarpeta de
+  // playlist esta queda dentro de la del sitio (ej. Downloads/Youtube/Mi playlist/).
+  if (settings.organizeBySite === true) {
+    downloadsPath = path.join(downloadsPath, getSiteFolderName(site, videoInfo, url));
+  }
   // Subcarpeta opcional (ej. nombre de la playlist) dentro de la ruta de descarga.
   // yt-dlp crea automáticamente las carpetas que falten al escribir el archivo.
   if (subfolder && subfolder.trim()) {
@@ -2078,6 +2416,14 @@ ipcMain.handle('app:download', async (event, { url, formatId, audioOnly, audioFo
     if (downloadId !== undefined && downloadId !== null) {
       activeProcs.set(downloadId, proc);
     }
+    // Además del downloadId interno, se registra también bajo el "extId"
+    // (si esta descarga vino de la extensión del navegador) para que el
+    // servidor HTTP local (extension-server.js) pueda pausarla/cancelarla
+    // directamente por ese id — el popup de la extensión nunca llega a
+    // conocer el downloadId interno del renderer, solo su propio extId.
+    if (extId) {
+      activeProcs.set(extId, proc);
+    }
 
     // Corte (exacto o no): hasta que llegue la primera línea "[download] XX.X%"
     // real (si es que llega) se muestra progreso indeterminado en vez de un 0%
@@ -2089,6 +2435,7 @@ ipcMain.handle('app:download', async (event, { url, formatId, audioOnly, audioFo
         indeterminateLabelKey: isExactTrim ? 'status_trimming' : 'status_trimming_section',
       });
     }
+    reportExt({ status: 'downloading' });
 
     // Node entrega el stdout de yt-dlp en bloques que no respetan los saltos
     // de línea: un mismo "chunk" puede traer varias líneas juntas (ej. la
@@ -2109,13 +2456,17 @@ ipcMain.handle('app:download', async (event, { url, formatId, audioOnly, audioFo
       if (percentMatch) {
         const speedMatch = line.match(/\bat\s+([\d.]+\S*\/s)/i);
         const etaMatch = line.match(/\bETA\s+(\d[\d:]*)/i);
+        const percentValue = parseFloat(percentMatch[1]);
+        const speedValue = speedMatch ? speedMatch[1] : null;
+        const etaValue = etaMatch ? etaMatch[1] : null;
         mainWindow.webContents.send('app:progress', {
           id: downloadId,
-          percent: parseFloat(percentMatch[1]),
-          speed: speedMatch ? speedMatch[1] : null,
-          eta: etaMatch ? etaMatch[1] : null,
+          percent: percentValue,
+          speed: speedValue,
+          eta: etaValue,
           indeterminate: false,
         });
+        reportExt({ status: 'downloading', percent: percentValue, speed: speedValue, eta: etaValue });
       }
 
       const destMatch =
@@ -2152,6 +2503,7 @@ ipcMain.handle('app:download', async (event, { url, formatId, audioOnly, audioFo
 
     proc.on('close', (code) => {
       if (downloadId !== undefined && downloadId !== null) activeProcs.delete(downloadId);
+      if (extId) activeProcs.delete(extId);
       cleanupTempCookieFiles(tempFiles);
       // Procesar cualquier resto que haya quedado en el buffer sin línea
       // final (\n) al momento de cerrarse el proceso.
@@ -2160,7 +2512,10 @@ ipcMain.handle('app:download', async (event, { url, formatId, audioOnly, audioFo
       // Pausado desde la UI: no es un error de yt-dlp, no se registra en el
       // historial. yt-dlp deja el archivo .part parcial, así que al reanudar
       // (volver a invocar la descarga con la misma URL) continúa donde quedó.
-      if (wasPaused) return resolve({ paused: true });
+      if (wasPaused) {
+        reportExt({ status: 'paused' });
+        return resolve({ paused: true });
+      }
       if (wasCanceled) {
         // A diferencia de pausar, cancelar significa que el usuario ya no
         // quiere ese archivo: se borran los restos parciales (.part, .ytdl)
@@ -2190,6 +2545,7 @@ ipcMain.handle('app:download', async (event, { url, formatId, audioOnly, audioFo
           if (attempt < 3) setTimeout(() => retryScan(attempt + 1), 400);
         };
         retryScan();
+        reportExt({ status: 'cancelled' });
         return resolve({ canceled: true });
       }
 
@@ -2208,10 +2564,21 @@ ipcMain.handle('app:download', async (event, { url, formatId, audioOnly, audioFo
           videoId: historyVideoId,
           extractorKey: historyExtractorKey,
         });
+        reportExt({ status: 'error', error: errorMessage });
         return reject(new Error(errorMessage));
       }
 
-      const finalPath = destinationPath || downloadsPath;
+      // Si lo parseado del stdout no coincide con nada real en disco (título
+      // con caracteres no-ASCII que corrompieron la línea "Destination:",
+      // ver findFallbackFinalFile más arriba), se busca el archivo nuevo de
+      // verdad comparando la carpeta antes/después en vez de quedarse con
+      // una ruta que "No se pudo abrir" — así "Abrir archivo" no falla en
+      // descargas que en realidad sí terminaron bien.
+      let finalPath = destinationPath || downloadsPath;
+      if (!fs.existsSync(finalPath)) {
+        const fallback = findFallbackFinalFile(downloadsPath, preExistingFiles, [thumbnailPath]);
+        if (fallback) finalPath = fallback;
+      }
       addHistoryEntry({
         date: new Date().toISOString(),
         status: 'success',
@@ -2224,36 +2591,85 @@ ipcMain.handle('app:download', async (event, { url, formatId, audioOnly, audioFo
         videoId: historyVideoId,
         extractorKey: historyExtractorKey,
       });
+      reportExt({ status: 'completed', percent: 100, path: finalPath, folder: path.dirname(finalPath) || downloadsPath });
       resolve({ path: finalPath });
     });
 
     proc.on('error', (spawnErr) => {
       if (downloadId !== undefined && downloadId !== null) activeProcs.delete(downloadId);
+      if (extId) activeProcs.delete(extId);
       cleanupTempCookieFiles(tempFiles);
+      const spawnErrorMessage = spawnErr.code === 'ENOENT'
+        ? 'No se encontró yt-dlp. Ve a Configuración → Actualizaciones para descargarlo.'
+        : (spawnErr.message || 'Error desconocido');
+      reportExt({ status: 'error', error: spawnErrorMessage });
       reject(spawnErr.code === 'ENOENT'
         ? new Error('No se encontró yt-dlp. Ve a Configuración → Actualizaciones para descargarlo.')
         : spawnErr);
     });
   });
+}
+
+ipcMain.handle('app:download', (_event, opts) => {
+  // Se guardan las opciones originales de toda descarga que venga de la
+  // extensión (trae extId) para poder reanudarla después vía resumeDownloadById,
+  // incluso si el popup de la extensión se cerró y se volvió a abrir mientras tanto.
+  if (opts && opts.extId) extensionDownloadOpts.set(opts.extId, opts);
+  return performDownload(opts);
 });
 
 // Pausar una descarga en curso: mata el proceso de yt-dlp (no hay pausa real
 // multiplataforma), pero como no se usa --no-continue, al reanudar retoma el
-// archivo .part desde donde quedó en vez de empezar de cero.
-ipcMain.on('app:pause', (_event, downloadId) => {
-  const proc = activeProcs.get(downloadId);
-  if (!proc) return;
+// archivo .part desde donde quedó en vez de empezar de cero. Se usa tanto
+// desde el panel de "Descargas en curso" (IPC, downloadId interno) como
+// desde el popup de la extensión del navegador (HTTP, extId) — ver
+// activeProcs.set(extId, proc) más arriba y /pause en extension-server.js.
+function pauseDownloadById(id) {
+  const proc = activeProcs.get(id);
+  if (!proc) return false;
   if (proc.__markPaused) proc.__markPaused();
   killProcessTree(proc);
-});
+  return true;
+}
+
+// Reanudar una descarga pausada desde la extensión: vuelve a invocar
+// performDownload con las mismas opciones que se usaron la primera vez
+// (guardadas en extensionDownloadOpts, ver ipcMain.handle('app:download')).
+// yt-dlp retoma el archivo .part solo (no se usa --no-continue), así que
+// alcanza con relanzar el proceso — no hace falta tocar argumentos.
+// Solo aplica a descargas que vinieron de la extensión (por HTTP, vía id);
+// las que arrancan desde la propia ventana ya se reanudan por su cuenta
+// (ver resumeActiveDownload en renderer.js, que vuelve a llamar a
+// window.yoinksAPI.download con el payload que guarda del lado del renderer).
+function resumeDownloadById(id) {
+  const opts = extensionDownloadOpts.get(id);
+  if (!opts) return false;
+  setExtensionDownload(id, { status: 'starting' });
+  performDownload(opts).catch(() => {
+    // Si falla al relanzar, processStdoutLine/proc.on('error') dentro de
+    // performDownload ya deja reflejado el estado 'error' vía reportExt;
+    // acá no hace falta hacer nada más.
+  });
+  return true;
+}
 
 // Cancelar una descarga en curso: mata el proceso; el archivo .part parcial
-// puede quedar en el disco (yt-dlp no lo borra al recibir la señal).
-ipcMain.on('app:cancel', (_event, downloadId) => {
-  const proc = activeProcs.get(downloadId);
-  if (!proc) return;
+// puede quedar en el disco (yt-dlp no lo borra al recibir la señal). Mismo
+// doble uso (IPC + HTTP) que pauseDownloadById.
+function cancelDownloadById(id) {
+  const proc = activeProcs.get(id);
+  if (!proc) return false;
   if (proc.__markCanceled) proc.__markCanceled();
   killProcessTree(proc);
+  return true;
+}
+
+ipcMain.on('app:pause', (_event, downloadId) => {
+  pauseDownloadById(downloadId);
+});
+
+ipcMain.on('app:cancel', (_event, downloadId) => {
+  cancelDownloadById(downloadId);
 });
 
 // ---- Descargar y guardar metadatos + miniatura del video ----

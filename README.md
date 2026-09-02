@@ -6,7 +6,7 @@
 
 <p align="center">
   <img alt="Platform" src="https://img.shields.io/badge/platform-Windows%2010%2F11-0078D6?logo=windows&logoColor=white">
-  <img alt="Version" src="https://img.shields.io/badge/version-1.0.0-brightgreen">
+  <img alt="Version" src="https://img.shields.io/badge/version-1.1.0-brightgreen">
   <img alt="License" src="https://img.shields.io/badge/license-MIT-blue">
   <img alt="Built with Electron" src="https://img.shields.io/badge/built%20with-Electron-47848F?logo=electron&logoColor=white">
   <a href="https://www.virustotal.com/gui/file/7c7fc13230e9f467810dba4b27239d1f248e36d2f8888a00b710703aaefac938?nocache=1">
@@ -37,6 +37,7 @@
 - 🧩 **Companion browser extension** — send the current tab straight to the app, no copy-pasting URLs.
 - 🍪 **Cookie support** — download age-restricted or private content you have access to.
 - ⚙️ **Presets** — save your favorite format/quality combinations for one-click downloads.
+- 🗂️ **Organize by site** — optionally save each download into a per-site subfolder (e.g. `Downloads/Youtube`, `Downloads/TikTok`) so your download folder stays tidy.
 - 🔄 **Automatic binary updates** — `yt-dlp`, `ffmpeg`, and Deno stay up to date on their own.
 - 📦 **Portable or installer** — use it however you prefer, no forced installation.
 - 🔒 **100% local** — everything runs on your machine; nothing is uploaded anywhere.
@@ -45,8 +46,9 @@
 
 | File | Description |
 |---|---|
-| **YT-DLP Minimalist Setup 1.0.0.exe** | Installer — recommended for most users |
-| **YT-DLP Minimalist 1.0.0 Portable.exe** | Portable version — no installation required |
+| **YT-DLP Minimalist Setup 1.1.0.exe** | Installer — recommended for most users |
+| **YT-DLP Minimalist 1.1.0 Portable.exe** | Portable version — no installation required |
+| **[YT-DLP_Minimalist_Extension.zip](https://pixeldrain.com/u/A5skyrPp)** | Companion browser extension (Chrome/Edge/Chromium) — see [Browser Extension](#browser-extension) |
 
 ### Requirements
 
@@ -56,8 +58,9 @@ Windows 10/11 (64-bit)
 
 Both files were scanned on VirusTotal and came back clean:
 
-- Installer: 0/67 detections — [View results](https://www.virustotal.com/gui/file/223ef8c23ee2cbc45e062b859beac9e0b5560e6d7fb291d4e453886c8da1c279?nocache=1)
-- Portable: 0/61 detections — [View results](https://www.virustotal.com/gui/file/654016167522f46685c8d87d34b042997ac3bcf1e478253db39529d03efe89f0)
+- Installer: 0/60 detections — [View results](https://www.virustotal.com/gui/file/3086f00121d1d2eb3c796acff9b04c28f4f64092affdd8761d1c04ca6cc082e8?nocache=1)
+- Portable: 0/60 detections — [View results](https://www.virustotal.com/gui/file/22b6eab05c51974cfcbc93d04a918582824b208d81573b7b50a4680276785534?nocache=1)
+- Extencion: 0/64 detections — [View results](https://www.virustotal.com/gui/file/5b6423342c7fd94f5dccdd311b4c212538e30d6de6d9ec8f8ff041eb27385151?nocache=1)
 
 ## Screenshots
 
@@ -111,11 +114,16 @@ Both files were scanned on VirusTotal and came back clean:
   <img src="screenshots/extension-01.png" alt="Browser extension popup" width="400">
   <img src="screenshots/extension-02.png" alt="Browser extension in use" width="400">
 </p>
+<p align="center">
+  <img src="screenshots/extension-03.png" alt="Browser extension download panel" width="400">
+</p>
 
 A companion browser extension (Chrome, Edge, and other Chromium-based browsers) lives in the
 [`extension/`](./extension) folder. It sends the current tab's URL straight to YT-DLP Minimalist
 so you can queue a download without copying and pasting the link — the app must be running to
 receive it, and everything stays local (`127.0.0.1`, nothing leaves your computer).
+
+**[⬇️ Download the extension (.zip)](https://pixeldrain.com/u/A5skyrPp)**
 
 See [`extension/README.md`](./extension/README.md) for installation steps.
 
@@ -205,6 +213,11 @@ work in Firefox with minor changes, but this isn't officially supported yet.
 **Why does downloading fail for some links?**
 `yt-dlp` support depends on the site. Update the bundled binaries from **Settings → Updates** —
 most failures are fixed by grabbing the latest `yt-dlp` build.
+
+**Can I keep my downloads organized by site automatically?**
+Yes — enable **Organize into per-site subfolders** in **Settings → Downloads** and each file
+will be saved under a subfolder named after its site (e.g. `Downloads/Youtube`,
+`Downloads/TikTok`) inside your chosen download path.
 
 ## Contributing
 

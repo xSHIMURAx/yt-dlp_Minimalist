@@ -352,10 +352,12 @@ const settingSubtitlesOptionsRow = document.getElementById('setting-subtitles-op
 const settingSubtitleModeRow = document.getElementById('setting-subtitle-mode-row');
 const settingThumbnailsEnabledCheckbox = document.getElementById('setting-thumbnails-enabled');
 const settingChaptersEnabledCheckbox = document.getElementById('setting-chapters-enabled');
+const settingOrganizeBySiteCheckbox = document.getElementById('setting-organize-by-site');
 const settingSoundEnabledCheckbox = document.getElementById('setting-sound-enabled');
 const settingSoundStyleSelect = document.getElementById('setting-sound-style');
 const settingCloseBehaviorSelect = document.getElementById('setting-close-behavior');
 const settingLanguageSelect = document.getElementById('setting-language');
+const settingExtensionKeepInBackgroundCheckbox = document.getElementById('setting-extension-keep-in-background');
 
 // Elementos del panel de Cookies (panel ⚙ → Cookies)
 const cookiesOverlay = document.getElementById('cookies-overlay');
@@ -566,6 +568,109 @@ window.yoinksAPI.onExtensionUrl((url) => {
   applyExtensionUrl(url);
 });
 
+// ---- Descarga directa con calidad elegida desde el navegador (popup/botón flotante) ----
+// A diferencia de applyExtensionUrl() (que solo pega el link y deja el picker
+// para que el usuario elija), acá la calidad ya viene decidida: se busca la
+// opción equivalente entre las que arma buildDownloadOptions() (la misma
+// lista que ve el picker) y se arranca la descarga al toque, sin mostrar
+// ninguna pantalla intermedia — el mismo resultado que si el usuario hubiera
+// pegado el link y clickeado esa fila a mano.
+let lastAppliedExtensionDownloadKey = null;
+
+// Busca en 'formatItems' (recién poblado por buildDownloadOptions) la fila
+// que mejor matchea la calidad pedida. Si la altura/bitrate exacto no está
+// disponible para este video en particular, cae a la más cercana en vez de
+// fallar — igual que elegir manualmente "lo más parecido" en el picker.
+function pickFormatItemForQuality(quality) {
+  if (!quality || quality.type === 'best') {
+    return formatItems.find((i) => i.isBest && !i.audioOnly) || null;
+  }
+  if (quality.type === 'audio') {
+    const bestAudio = formatItems.find((i) => i.isBest && i.audioOnly) || formatItems.find((i) => i.audioOnly);
+    if (!bestAudio) return null;
+    // La extensión puede pedir un formato específico (M4A/OPUS) en vez del
+    // MP3 por defecto del preset "Mejor audio disponible" — ver AUDIO_FORMATS.
+    const format = quality.format && AUDIO_FORMATS.includes(quality.format) ? quality.format : 'mp3';
+    if (format === bestAudio.audioFormat) return bestAudio;
+    return { ...bestAudio, ext: format, audioFormat: format };
+  }
+  if (quality.type === 'video' && quality.height) {
+    const videoTiers = formatItems.filter((i) => !i.audioOnly && !i.isPreset);
+    const exact = videoTiers.find((i) => i.res === `${quality.height}p`);
+    if (exact) return exact;
+    // Sin esa altura exacta: la mejor disponible que no la supere: si no hay
+    // ninguna menor (el video es más chico que lo pedido), la más alta que haya.
+    const sorted = [...videoTiers].sort((a, b) => parseInt(b.res, 10) - parseInt(a.res, 10));
+    return sorted.find((i) => parseInt(i.res, 10) <= quality.height) || sorted[0] || null;
+  }
+  return null;
+}
+
+async function applyExtensionDownload(payload) {
+  const { url, quality, extId } = payload || {};
+  if (!url) return;
+  const key = `${url}::${JSON.stringify(quality || {})}`;
+  // Mismo motivo que 'lastAppliedExtensionUrl' en applyExtensionUrl(): evita
+  // procesar dos veces el mismo pedido si main.js llegara a reenviarlo.
+  if (key === lastAppliedExtensionDownloadKey) return;
+  lastAppliedExtensionDownloadKey = key;
+  // Si esto vino del link de protocolo en frío (main.js reintenta cada
+  // ~400ms hasta por ~6s — ver startPendingUrlDelivery), confirmamos acá
+  // para que deje de reenviarlo. Sin esto, un reenvío que llegara pasados
+  // los 2s de abajo (dedupe local ya vencido) dispararía la misma descarga
+  // dos veces.
+  if (window.yoinksAPI.ackExtensionUrl) window.yoinksAPI.ackExtensionUrl();
+  setTimeout(() => {
+    if (lastAppliedExtensionDownloadKey === key) lastAppliedExtensionDownloadKey = null;
+  }, 2000);
+
+  goToHomeScreen();
+  currentUrl = url;
+  input.value = url;
+  updateClearBtnVisibility();
+  setStatus(window.i18n.t('searching_formats'), 'loading', 'home');
+
+  try {
+    const info = await withRetries(() => window.yoinksAPI.fetchFormats(url), {
+      maxRetries: 2,
+      delayMs: 1500,
+      onRetry: (attempt, total) =>
+        setStatus(window.i18n.t('no_response_retrying', { attempt, total }), 'loading', 'home'),
+    });
+    currentVideoInfo = info;
+    await checkIfAlreadyDownloaded(info, url);
+    resetTrimSection();
+    buildDownloadOptions(info);
+
+    const opt = pickFormatItemForQuality(quality);
+    if (!opt) {
+      // No se pudo resolver ninguna fila razonable (caso raro): mostramos el
+      // picker igual que con un link pegado a mano, para que el usuario elija.
+      renderVideoMeta(info);
+      renderDownloadList();
+      setStatus('', '', 'home');
+      currentPickerStatusOwner = null;
+      setStatus('', '', 'picker');
+      goToPickerScreen();
+      return;
+    }
+
+    setStatus('', '', 'home');
+    // La descarga vino de la extensión con una calidad ya elegida (no del
+    // picker): abrimos el panel de Actividad en "Descargas en curso" apenas
+    // arranca (sin esperar a que termine, ver comentario abajo), para que
+    // se vea entrar sin que el usuario tenga que ir a buscarlo.
+    startDownload(opt, { extId });
+    openActivityPanel('downloads');
+  } catch (err) {
+    setStatus(window.i18n.t('could_not_read_link', { error: err.message }), 'error', 'home');
+  }
+}
+
+window.yoinksAPI.onExtensionDownload((payload) => {
+  applyExtensionDownload(payload);
+});
+
 // Si la app se acaba de abrir a partir de un link "ytdlpminimalist://..."
 // (el usuario le dio "Descargar" en la extensión sin tener la app abierta),
 // lo pedimos apenas terminamos de inicializar en vez de esperar a que
@@ -573,8 +678,15 @@ window.yoinksAPI.onExtensionUrl((url) => {
 // tarda un poco más en arrancar, el link no se pierde.
 (async function checkPendingExtensionUrl() {
   try {
-    const pendingUrl = await window.yoinksAPI.getPendingExtensionUrl();
-    if (pendingUrl) applyExtensionUrl(pendingUrl);
+    const pending = await window.yoinksAPI.getPendingExtensionUrl();
+    if (!pending) return;
+    // Con calidad: mismo camino que un pedido de descarga directa (arranca
+    // sola, sin picker). Sin calidad: el camino de siempre, pegar el link.
+    if (pending.quality) {
+      applyExtensionDownload({ url: pending.url, quality: pending.quality, extId: pending.extId });
+    } else {
+      applyExtensionUrl(pending.url);
+    }
   } catch (e) {
     // No había link pendiente, o falló la consulta; no hacemos nada.
   }
@@ -2634,7 +2746,8 @@ input.addEventListener('keydown', (e) => {
   }
 });
 
-async function startDownload(opt) {
+async function startDownload(opt, extraOptions) {
+  const { extId } = extraOptions || {};
   const label = opt.isPreset ? opt.res : `${opt.res}`;
 
   let trimSection;
@@ -2691,7 +2804,7 @@ async function startDownload(opt) {
   });
 
   try {
-    const result = await window.yoinksAPI.download({ ...payload, downloadId });
+    const result = await window.yoinksAPI.download({ ...payload, downloadId, extId: extId || null });
     const isVisible = currentPickerStatusOwner === downloadId;
     if (result && result.paused) {
       setActiveDownloadStatus(downloadId, 'paused');
@@ -4226,6 +4339,7 @@ async function loadDownloadSettings() {
 function applyDownloadSettingsToForm(settings) {
   settingDownloadPathInput.value = settings.downloadPath || '';
   settingOutputTemplateInput.value = settings.outputTemplate || '%(title).200B - %(uploader).30B.%(ext)s';
+  settingOrganizeBySiteCheckbox.checked = settings.organizeBySite === true;
 
   settingRateLimitInput.value = settings.rateLimit || '';
   settingRateLimitModeSelect.value = settings.rateLimitMode === 'total' ? 'total' : 'perFile';
@@ -4299,6 +4413,7 @@ downloadSettingsSaveBtn.addEventListener('click', async () => {
   const settings = {
     downloadPath: settingDownloadPathInput.value.trim(),
     outputTemplate: settingOutputTemplateInput.value.trim() || '%(title).200B - %(uploader).30B.%(ext)s',
+    organizeBySite: settingOrganizeBySiteCheckbox.checked,
     cookiesPerSite: current.cookiesPerSite,
     rateLimit: settingRateLimitInput.value.trim(),
     rateLimitMode: settingRateLimitModeSelect.value === 'total' ? 'total' : 'perFile',
@@ -4349,6 +4464,7 @@ function applyGeneralSettingsToForm(settings) {
   settingSoundStyleSelect.value = settings.soundStyle === 'windows' ? 'windows' : 'chime';
   settingCloseBehaviorSelect.value = ['ask', 'minimize', 'close'].includes(settings.closeBehavior) ? settings.closeBehavior : 'ask';
   settingLanguageSelect.value = settings.language === 'en' ? 'en' : 'es';
+  settingExtensionKeepInBackgroundCheckbox.checked = settings.extensionKeepInBackground === true;
 }
 
 function openGeneralPanel() {
@@ -4383,6 +4499,7 @@ generalSaveBtn.addEventListener('click', async () => {
       soundStyle: settingSoundStyleSelect.value === 'windows' ? 'windows' : 'chime',
       closeBehavior: settingCloseBehaviorSelect.value,
       language: settingLanguageSelect.value,
+      extensionKeepInBackground: settingExtensionKeepInBackgroundCheckbox.checked,
     });
     applyGeneralSettingsToForm(saved);
     applyLanguage(saved.language === 'en' ? 'en' : 'es');
@@ -4396,8 +4513,22 @@ generalSaveBtn.addEventListener('click', async () => {
 generalResetBtn.addEventListener('click', () => {
   // Restablece solo el formulario en pantalla a los valores por defecto;
   // hay que presionar "Guardar" para que quede persistido.
-  applyGeneralSettingsToForm({ soundEnabled: true, soundStyle: 'chime', closeBehavior: 'ask', language: 'es' });
+  applyGeneralSettingsToForm({ soundEnabled: true, soundStyle: 'chime', closeBehavior: 'ask', language: 'es', extensionKeepInBackground: false });
 });
+
+// El toggle "Mantener en segundo plano" cambió desde las Opciones de la
+// extensión del navegador: actualizamos SOLO ese checkbox (no todo el
+// formulario, para no pisar otros cambios sin guardar que el usuario pueda
+// tener abiertos en este mismo panel) sin importar si el panel General está
+// visible en este momento o no — si está cerrado, no se nota nada, y la
+// próxima vez que se abra ya carga el valor correcto desde disco igual.
+if (window.yoinksAPI.onExtensionSettingsUpdated) {
+  window.yoinksAPI.onExtensionSettingsUpdated((data) => {
+    if (data && typeof data.extensionKeepInBackground === 'boolean') {
+      settingExtensionKeepInBackgroundCheckbox.checked = data.extensionKeepInBackground;
+    }
+  });
+}
 
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && !generalOverlay.classList.contains('hidden')) {
@@ -4578,9 +4709,9 @@ async function loadUpdateVersions() {
 async function loadYtdlpChannelSetting() {
   try {
     const settings = await window.yoinksAPI.getSettings();
-    settingYtdlpChannelSelect.value = (settings && settings.ytdlpChannel) || 'nightly';
+    settingYtdlpChannelSelect.value = (settings && settings.ytdlpChannel) || 'stable';
   } catch (e) {
-    settingYtdlpChannelSelect.value = 'nightly';
+    settingYtdlpChannelSelect.value = 'stable';
   }
 }
 

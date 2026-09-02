@@ -487,6 +487,14 @@
         </div>
 
         <div class="settings-row">
+          <label class="playlist-folder-checkbox">
+            <input type="checkbox" id="setting-organize-by-site" />
+            <span data-i18n="setting_organize_by_site">Organizar en subcarpetas por sitio</span>
+          </label>
+          <span class="settings-hint" data-i18n="organize_by_site_hint">Crea una subcarpeta con el nombre del sitio (ej. Youtube, TikTok) dentro de la ruta de descargas</span>
+        </div>
+
+        <div class="settings-row">
           <label for="setting-output-template" data-i18n="settings_row_output_template">Plantilla de salida</label>
           <input type="text" id="setting-output-template" placeholder="%(title).200B - %(uploader).30B.%(ext)s" />
           <span class="settings-hint" data-i18n="output_template_hint">Formato de nombre de archivo usado por yt-dlp (-o)</span>
@@ -571,6 +579,14 @@
             <option value="close" data-i18n="opt_close_close">Cerrar el programa</option>
           </select>
           <span class="settings-hint" data-i18n="close_behavior_hint">Qué hacer al presionar ✕: minimizar el programa junto a los demás iconos de la bandeja, cerrarlo por completo, o preguntar cada vez.</span>
+        </div>
+
+        <div class="settings-row">
+          <label class="playlist-folder-checkbox">
+            <input type="checkbox" id="setting-extension-keep-in-background" />
+            <span data-i18n="extension_keep_in_background">Al descargar desde la extensión, mantener la app en segundo plano</span>
+          </label>
+          <span class="settings-hint" data-i18n="extension_keep_in_background_hint">Si ya elegiste la calidad en el navegador (popup o botón flotante), la descarga arranca sin traer la ventana al frente. No aplica cuando hay que elegir la calidad en el selector de la app.</span>
         </div>
       </div>
 

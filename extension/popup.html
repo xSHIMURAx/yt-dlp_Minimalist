@@ -5,17 +5,35 @@
   <title>YT-DLP Minimalist</title>
   <style>
     body {
-      width: 260px;
+      width: 430px;
       margin: 0;
       padding: 16px;
       background: #0d0d0d;
       color: #e6e6e6;
       font-family: -apple-system, "Segoe UI", Arial, sans-serif;
+      /* El panel de ajustes (#settingsPanel) es un dropdown flotante que se
+         posiciona con position:fixed y puede "sobresalir" del alto normal
+         del contenido. Sin este overflow:hidden, Chrome recalcula el alto
+         intrínseco del popup cada vez que ese dropdown se abre y termina
+         agrandando la ventana entera del popup en vez de mostrar el
+         dropdown como una capa flotante encima del contenido. Como el
+         dropdown usa position:fixed, no lo recorta este overflow (los
+         elementos fixed no se clipean por el overflow de sus ancestros,
+         solo por el viewport), así que se sigue viendo completo.
+      */
+      overflow: hidden;
+    }
+    #headerRow {
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 10px;
     }
     h1 {
       font-size: 13px;
       font-weight: 600;
-      margin: 0 0 10px;
+      margin: 0;
       color: #f5f5f5;
       text-transform: uppercase;
       letter-spacing: 0.04em;
@@ -30,6 +48,30 @@
       display: -webkit-box;
       -webkit-line-clamp: 2;
       -webkit-box-orient: vertical;
+    }
+    #qualityRow {
+      margin-bottom: 10px;
+    }
+    #qualityRow label {
+      display: block;
+      font-size: 10.5px;
+      color: #888;
+      margin-bottom: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+    #qualitySelect {
+      width: 100%;
+      padding: 8px 9px;
+      background: #171717;
+      color: #e6e6e6;
+      border: 1px solid #2a2a2a;
+      border-radius: 6px;
+      font-size: 12.5px;
+      cursor: pointer;
+    }
+    #qualitySelect:hover {
+      border-color: #4a4a4a;
     }
     button {
       width: 100%;
@@ -57,37 +99,140 @@
     }
     #status.error { color: #ff8080; }
     #status.success { color: #f5f5f5; }
+    /* ---- Barra rápida: abrir programa / botón flotante / auto-abrir popup ---- */
+    #headerControls {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      position: relative;
+    }
+    #quickToolbar {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding-right: 6px;
+      border-right: 1px solid #2a2a2a;
+    }
+    .quick-icon-btn {
+      width: auto;
+      flex: none;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 6px;
+      background: none;
+      border: none;
+      border-radius: 6px;
+      color: #a0a0a0;
+      cursor: pointer;
+    }
+    .quick-icon-btn:hover {
+      color: #e6e6e6;
+      background: #171717;
+    }
+    .quick-icon-btn svg {
+      width: 15px;
+      height: 15px;
+    }
+    .quick-toggle {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      padding: 4px 6px;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    .quick-toggle:hover {
+      background: #171717;
+    }
+    .quick-toggle-label {
+      font-size: 10px;
+      color: #a0a0a0;
+      white-space: nowrap;
+    }
+    .toggle-switch {
+      position: relative;
+      display: inline-block;
+      width: 28px;
+      height: 16px;
+      flex-shrink: 0;
+    }
+    .toggle-switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+      position: absolute;
+    }
+    .toggle-slider {
+      position: absolute;
+      inset: 0;
+      background: #2a2a2a;
+      border-radius: 999px;
+      transition: background 0.15s ease;
+    }
+    .toggle-slider::before {
+      content: "";
+      position: absolute;
+      width: 12px;
+      height: 12px;
+      left: 2px;
+      top: 2px;
+      background: #e6e6e6;
+      border-radius: 50%;
+      transition: transform 0.15s ease;
+    }
+    .toggle-switch input:checked + .toggle-slider {
+      background: #5aa9ff;
+    }
+    .toggle-switch input:checked + .toggle-slider::before {
+      transform: translateX(12px);
+      background: #0d0d0d;
+    }
     #optionsLink {
       display: flex;
       align-items: center;
       justify-content: center;
-      gap: 5px;
-      margin-top: 12px;
-      font-size: 11px;
+      flex-shrink: 0;
+      width: 24px;
+      height: 24px;
+      padding: 0;
       color: #6b6b6b;
-      text-align: center;
-      text-decoration: none;
-      cursor: pointer;
       background: none;
       border: none;
-      width: 100%;
-      padding: 4px;
+      border-radius: 6px;
+      cursor: pointer;
     }
-    #optionsLink:hover { color: #a0a0a0; }
-    #optionsLink .chevron {
-      display: inline-block;
-      transition: transform 0.15s ease;
-      font-size: 9px;
+    #optionsLink:hover {
+      color: #e6e6e6;
+      background: #171717;
     }
-    #optionsLink[aria-expanded="true"] .chevron {
-      transform: rotate(180deg);
+    #optionsLink[aria-expanded="true"] {
+      color: #f5f5f5;
+      background: #1f1f1f;
+    }
+    #optionsLink svg {
+      width: 16px;
+      height: 16px;
+      transition: transform 0.2s ease;
+    }
+    #optionsLink[aria-expanded="true"] svg {
+      transform: rotate(35deg);
     }
     #settingsPanel {
       display: none;
-      margin-top: 10px;
+      /* fixed (no absolute): así no cuenta para el alto "de flujo normal"
+         que Chrome usa para autoajustar el tamaño del popup — ver el
+         comentario en la regla de "body" más arriba. La posición exacta
+         (top/left) se calcula en popup.js, relativa al ícono del engranaje,
+         cada vez que se abre. */
+      position: fixed;
+      width: 230px;
+      background: #141414;
       border: 1px solid #2a2a2a;
       border-radius: 8px;
       overflow: hidden;
+      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+      z-index: 20;
     }
     #settingsPanel.open {
       display: block;
@@ -113,6 +258,16 @@
       height: 14px;
       flex-shrink: 0;
     }
+    /* El toggle "Desactivar en este sitio" reusa .toggle-switch dentro de
+       un label.option — esta regla (más específica que la de arriba)
+       mantiene el checkbox oculto para que se vea como switch y no como
+       checkbox cuadrado de 14x14. */
+    label.option .toggle-switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+      position: absolute;
+    }
     .option-text {
       display: flex;
       flex-direction: column;
@@ -137,36 +292,578 @@
     #saved.show {
       opacity: 1;
     }
+
+    /* ---- Barra de pestañas (Descargar / Historial) ---- */
+    #tabBar {
+      display: flex;
+      gap: 18px;
+      border-bottom: 1px solid #2a2a2a;
+      margin-bottom: 14px;
+    }
+    .tab-btn {
+      width: auto;
+      flex: none;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      background: none;
+      border: none;
+      border-bottom: 2px solid transparent;
+      margin-bottom: -1px;
+      color: #7a7a7a;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 0 0 9px;
+      cursor: pointer;
+    }
+    .tab-btn svg {
+      width: 14px;
+      height: 14px;
+      flex-shrink: 0;
+    }
+    .tab-btn:hover {
+      color: #c9c9c9;
+    }
+    .tab-btn.active {
+      color: #5aa9ff;
+      border-bottom-color: #5aa9ff;
+    }
+    .tab-panel {
+      display: none;
+    }
+    .tab-panel.active {
+      display: block;
+    }
+
+    /* ---- Lista de descargas en curso (una tarjeta por descarga activa) ----
+       Antes había una única #progressScreen con IDs fijos (mostraba solo la
+       última descarga enviada); ahora son clases reutilizables porque puede
+       haber N tarjetas al mismo tiempo, una por cada descarga en curso. */
+    #progressList {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      max-height: 420px;
+      overflow-y: auto;
+    }
+    .progress-card {
+      position: relative;
+      border: 1px solid #2a2a2a;
+      border-radius: 8px;
+      padding: 10px 28px 10px 12px;
+      transition: opacity 0.3s ease, transform 0.3s ease, max-height 0.3s ease, margin 0.3s ease, padding 0.3s ease;
+    }
+    /* Botón "×" para sacar una tarjeta a mano del panel de Progreso, sin
+       depender de que la app conteste (ej. una descarga que quedó en
+       "Sin conexión con la app…" y nunca más se resuelve sola). No cancela
+       nada del lado de la app: solo deja de mostrarla/seguirla acá. */
+    .progress-card-close {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      width: 18px;
+      height: 18px;
+      padding: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: none;
+      border: none;
+      border-radius: 4px;
+      color: #6b6b6b;
+      font-size: 14px;
+      line-height: 1;
+      cursor: pointer;
+    }
+    .progress-card-close:hover {
+      color: #ff8080;
+      background: rgba(255, 128, 128, 0.1);
+    }
+    /* Al llegar a un estado final (completado/error/cancelado) la tarjeta se
+       desvanece sola y se saca de la lista poco después — ver removeCard en
+       popup.js — así el panel se va "vaciando" a medida que cada descarga
+       termina, en vez de acumular tarjetas ya resueltas. */
+    .progress-card.removing {
+      opacity: 0;
+      transform: translateY(-6px);
+      max-height: 0;
+      margin: 0;
+      padding-top: 0;
+      padding-bottom: 0;
+      overflow: hidden;
+      border-color: transparent;
+    }
+    .progress-title {
+      font-size: 12.5px;
+      color: #e6e6e6;
+      margin-bottom: 10px;
+      max-height: 36px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+    }
+    .progress-bar-wrap {
+      width: 100%;
+      height: 8px;
+      background: #1c1c1c;
+      border: 1px solid #2a2a2a;
+      border-radius: 999px;
+      overflow: hidden;
+      margin-bottom: 8px;
+    }
+    .progress-bar-fill {
+      height: 100%;
+      width: 0%;
+      background: #f5f5f5;
+      border-radius: 999px;
+      transition: width 0.25s ease;
+    }
+    .progress-bar-fill.indeterminate {
+      width: 40%;
+      animation: indeterminate-slide 1.1s ease-in-out infinite;
+    }
+    .progress-bar-fill.done {
+      background: #8fe3a0;
+    }
+    .progress-bar-fill.error {
+      background: #ff8080;
+    }
+    @keyframes indeterminate-slide {
+      0% { margin-left: -40%; }
+      100% { margin-left: 100%; }
+    }
+    .progress-status-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: 4px;
+    }
+    .progress-status-text {
+      font-size: 12.5px;
+      font-weight: 600;
+      color: #e6e6e6;
+    }
+    .progress-status-text.success { color: #8fe3a0; }
+    .progress-status-text.error { color: #ff8080; }
+    .progress-meta {
+      font-size: 11px;
+      color: #888;
+      min-height: 14px;
+    }
+    .download-controls {
+      display: none;
+      gap: 8px;
+      margin-top: 12px;
+    }
+    .download-controls.show {
+      display: flex;
+    }
+    .download-controls button {
+      flex: 1;
+      padding: 9px 6px;
+      font-size: 12px;
+    }
+    .pause-btn, .resume-btn {
+      background: none;
+      color: #e6e6e6;
+      border: 1px solid #2a2a2a;
+    }
+    .pause-btn:hover:not(:disabled), .resume-btn:hover:not(:disabled) {
+      border-color: #4a4a4a;
+      background: #171717;
+    }
+    /* pause-btn y resume-btn nunca se muestran juntos: cuál de los dos está
+       visible depende del estado (descargando -> pausar, en pausa -> reanudar).
+       Por defecto pause-btn está visible (caso "descargando" de toda la vida)
+       y resume-btn oculto; updateCard alterna la clase .show en ambos. */
+    .pause-btn.hide {
+      display: none;
+    }
+    .resume-btn {
+      display: none;
+      color: #5aa9ff;
+      border-color: rgba(90, 169, 255, 0.4);
+    }
+    .resume-btn:hover:not(:disabled) {
+      border-color: #5aa9ff;
+      background: rgba(90, 169, 255, 0.1);
+    }
+    .resume-btn.show {
+      display: block;
+    }
+    .cancel-btn {
+      background: none;
+      color: #ff8080;
+      border: 1px solid #3a2020;
+    }
+    .cancel-btn:hover:not(:disabled) {
+      border-color: #ff8080;
+      background: rgba(255, 128, 128, 0.08);
+    }
+
+    /* ---- Pestaña de historial ---- */
+    #historyToolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+    #historyFilters {
+      display: flex;
+      gap: 4px;
+    }
+    .filter-btn {
+      width: auto;
+      background: none;
+      border: 1px solid transparent;
+      color: #888;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 5px 10px;
+      border-radius: 20px;
+      cursor: pointer;
+    }
+    .filter-btn:hover:not(:disabled) {
+      color: #c9c9c9;
+      background: #171717;
+    }
+    .filter-btn.active {
+      background: rgba(90, 169, 255, 0.14);
+      color: #5aa9ff;
+      border-color: rgba(90, 169, 255, 0.4);
+    }
+    #clearHistoryBtn {
+      width: 26px;
+      height: 26px;
+      flex-shrink: 0;
+      padding: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: none;
+      color: #6b6b6b;
+      border: 1px solid #2a2a2a;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    #clearHistoryBtn svg {
+      width: 13px;
+      height: 13px;
+    }
+    #clearHistoryBtn:hover:not(:disabled) {
+      color: #ff8080;
+      border-color: #ff8080;
+    }
+    #clearHistoryBtn:disabled {
+      opacity: 0.35;
+      cursor: default;
+    }
+    #historyEmpty {
+      display: none;
+      color: #6b6b6b;
+      font-size: 12px;
+      text-align: center;
+      padding: 34px 10px;
+    }
+    #progressEmptyState {
+      display: none;
+      color: #6b6b6b;
+      font-size: 12px;
+      text-align: center;
+      padding: 34px 10px;
+    }
+    #progressEmptyState.show {
+      display: block;
+    }
+    #progressEmptySubtext {
+      margin-top: 4px;
+      font-size: 11px;
+      color: #555;
+    }
+    #historyList {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      max-height: 320px;
+      overflow-y: auto;
+    }
+    li.entry {
+      border: 1px solid #2a2a2a;
+      border-radius: 8px;
+      padding: 9px 10px;
+    }
+    .entry-title {
+      font-size: 12.5px;
+      font-weight: 600;
+      color: #f0f0f0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .entry-url {
+      font-size: 11px;
+      color: #808080;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      margin-top: 2px;
+    }
+    .entry-meta {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-top: 6px;
+    }
+    .entry-time {
+      font-size: 10.5px;
+      color: #6b6b6b;
+    }
+    .entry-status {
+      font-size: 10px;
+      font-weight: 600;
+      padding: 2px 7px;
+      border-radius: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      white-space: nowrap;
+    }
+    .entry-status.sent {
+      background: rgba(90, 169, 255, 0.12);
+      color: #5aa9ff;
+    }
+    .entry-status.protocol {
+      background: rgba(240, 190, 90, 0.12);
+      color: #f0be5a;
+    }
+    .entry-status.completed {
+      background: rgba(120, 220, 150, 0.12);
+      color: #7ee0a0;
+    }
+    .entry-status.error {
+      background: rgba(255, 128, 128, 0.12);
+      color: #ff8080;
+    }
+    .entry-actions {
+      display: flex;
+      gap: 6px;
+      margin-top: 8px;
+    }
+    .entry-action-btn {
+      width: auto;
+      flex: 1;
+      padding: 6px 4px;
+      font-size: 10.5px;
+      font-weight: 600;
+      background: none;
+      color: #c9c9c9;
+      border: 1px solid #2a2a2a;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    .entry-action-btn:hover:not(:disabled) {
+      border-color: #4a4a4a;
+      color: #f5f5f5;
+      background: #171717;
+    }
+    .entry-action-btn.error {
+      color: #ff8080;
+      border-color: #3a2020;
+    }
   </style>
 </head>
 <body>
-  <h1>YT-DLP Minimalist</h1>
-  <div id="pageTitle">Cargando pestaña…</div>
-  <button id="sendBtn">Enviar a YT-DLP Minimalist</button>
-  <div id="status"></div>
-  <button id="optionsLink" aria-expanded="false">
-    <span>Ajustes del botón flotante</span>
-    <span class="chevron">▾</span>
-  </button>
-  <div id="settingsPanel">
-    <div class="setting-title">Botón flotante</div>
-    <label class="option">
-      <input type="radio" name="mode" value="icon" />
-      <span class="option-text">
-        <span class="option-title">Solo ícono (compacto)</span>
-        <span class="option-desc">50×20px, pegado a la esquina del video.</span>
-      </span>
-    </label>
-    <label class="option">
-      <input type="radio" name="mode" value="text" />
-      <span class="option-text">
-        <span class="option-title">Ícono + texto "Descargar"</span>
-        <span class="option-desc">Más visible, con el texto al lado del ícono.</span>
-      </span>
-    </label>
-    <div id="saved">Guardado ✓</div>
+  <div id="headerRow">
+    <h1>YT-DLP MINIMALIST</h1>
+    <div id="headerControls">
+      <div id="quickToolbar">
+        <button id="openAppBtn" class="quick-icon-btn" title="Abrir el programa" data-i18n-title="open_app_title">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+            <polyline points="15 3 21 3 21 9"></polyline>
+            <line x1="10" y1="14" x2="21" y2="3"></line>
+          </svg>
+        </button>
+        <label class="quick-toggle" title="Mostrar/ocultar el botón flotante sobre los videos" data-i18n-title="toggle_floating_title">
+          <span class="quick-toggle-label" data-i18n="toggle_floating_label">Flotante</span>
+          <span class="toggle-switch">
+            <input type="checkbox" id="overlayEnabledToggle" />
+            <span class="toggle-slider"></span>
+          </span>
+        </label>
+        <label class="quick-toggle" title="Abrir este popup automáticamente al agregar una descarga" data-i18n-title="toggle_autoopen_title">
+          <span class="quick-toggle-label" data-i18n="toggle_autoopen_label">Auto-abrir</span>
+          <span class="toggle-switch">
+            <input type="checkbox" id="autoOpenPopupToggle" />
+            <span class="toggle-slider"></span>
+          </span>
+        </label>
+      </div>
+      <button id="optionsLink" aria-expanded="false" title="Ajustes del botón flotante" data-i18n-title="options_link_title">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"></circle>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+        </svg>
+      </button>
+      <div id="settingsPanel">
+      <div class="setting-title" data-i18n="settings_overlay_legend">Botón flotante</div>
+      <label class="option">
+        <input type="radio" name="mode" value="icon" />
+        <span class="option-text">
+          <span class="option-title" data-i18n="overlay_icon_title">Solo ícono (compacto)</span>
+          <span class="option-desc" data-i18n="overlay_icon_desc">50×20px, pegado a la esquina del video.</span>
+        </span>
+      </label>
+      <label class="option">
+        <input type="radio" name="mode" value="text" />
+        <span class="option-text">
+          <span class="option-title" data-i18n="overlay_text_title">Ícono + texto "Descargar"</span>
+          <span class="option-desc" data-i18n="overlay_text_desc">Más visible, con el texto al lado del ícono.</span>
+        </span>
+      </label>
+      <div class="setting-title" data-i18n="settings_downloads_legend" style="margin-top: 4px; border-top: 1px solid #2a2a2a; padding-top: 8px;">Descargas desde la extensión</div>
+      <label class="option" id="keepAppInBackgroundOption">
+        <span class="toggle-switch">
+          <input type="checkbox" id="keepAppInBackgroundToggle" />
+          <span class="toggle-slider"></span>
+        </span>
+        <span class="option-text">
+          <span class="option-title" data-i18n="keep_app_in_background_title">Mantener la app en segundo plano</span>
+          <span class="option-desc" data-i18n="keep_app_in_background_desc">Si ya elegiste la calidad acá (popup o botón flotante), la descarga arranca sin traer la ventana de la app al frente. Es el mismo ajuste que hay en la app (Configuración → General): cambiarlo de cualquiera de los dos lados actualiza el otro.</span>
+        </span>
+      </label>
+      <div id="keepAppInBackgroundSyncHint" data-i18n="sync_hint" style="display:none; font-size: 11px; color: #d0a24c; padding: 0 10px 8px;">No se pudo sincronizar con la app — abrila para que este ajuste quede igual en los dos lados.</div>
+      <label class="option" id="disableSiteOption" style="margin-top: 4px; border-top: 1px solid #2a2a2a; padding-top: 10px;">
+        <span class="toggle-switch">
+          <input type="checkbox" id="disableSiteToggle" />
+          <span class="toggle-slider"></span>
+        </span>
+        <span class="option-text">
+          <span class="option-title" data-i18n="disable_site_title">Desactivar botón flotante en este sitio</span>
+          <span class="option-desc" id="disableSiteDesc"></span>
+        </span>
+      </label>
+      <label class="option" id="disableExtensionSiteOption">
+        <span class="toggle-switch">
+          <input type="checkbox" id="disableExtensionSiteToggle" />
+          <span class="toggle-slider"></span>
+        </span>
+        <span class="option-text">
+          <span class="option-title" data-i18n="disable_extension_site_title">Desactivar la extensión en este sitio</span>
+          <span class="option-desc" id="disableExtensionSiteDesc"></span>
+        </span>
+      </label>
+      <div class="setting-title" data-i18n="settings_language_legend" style="margin-top: 4px; border-top: 1px solid #2a2a2a; padding-top: 8px;">Idioma</div>
+      <label class="option">
+        <input type="radio" name="language" value="es" />
+        <span class="option-text">
+          <span class="option-title" data-i18n="language_es">Español</span>
+        </span>
+      </label>
+      <label class="option">
+        <input type="radio" name="language" value="en" />
+        <span class="option-text">
+          <span class="option-title" data-i18n="language_en">English</span>
+        </span>
+      </label>
+      <div id="saved" data-i18n="saved_label">Guardado ✓</div>
+      </div>
+    </div>
   </div>
+
+  <div id="tabBar">
+    <button class="tab-btn active" id="tabBtnDownload" data-tab="download">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+        <polyline points="7 10 12 15 17 10"></polyline>
+        <line x1="12" y1="15" x2="12" y2="3"></line>
+      </svg>
+      <span data-i18n="tab_download">Descargar</span>
+    </button>
+    <button class="tab-btn" id="tabBtnProgress" data-tab="progress">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 12a9 9 0 1 1-3.5-7.14"></path>
+        <polyline points="21 3 21 9 15 9"></polyline>
+      </svg>
+      <span data-i18n="tab_progress">Progreso</span>
+    </button>
+    <button class="tab-btn" id="tabBtnHistory" data-tab="history">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="9"></circle>
+        <polyline points="12 7 12 12 16 14"></polyline>
+      </svg>
+      <span data-i18n="tab_history">Historial</span>
+    </button>
+  </div>
+
+  <div id="downloadTab" class="tab-panel active">
+    <div id="sendScreen">
+      <div id="pageTitle" data-i18n="loading_tab">Cargando pestaña…</div>
+      <div id="qualityRow">
+        <label for="qualitySelect" data-i18n="quality_label">Calidad</label>
+        <select id="qualitySelect">
+          <option value="best" data-i18n="quality_opt_best">Mejor calidad (video+audio)</option>
+          <option value="video:2160" data-i18n="quality_opt_2160">2160p 4K</option>
+          <option value="video:1440" data-i18n="quality_opt_1440">1440p QHD</option>
+          <option value="video:1080" data-i18n="quality_opt_1080">1080p HD</option>
+          <option value="video:720" data-i18n="quality_opt_720">720p HD</option>
+          <option value="video:480" data-i18n="quality_opt_480">480p</option>
+          <option value="video:360" data-i18n="quality_opt_360">360p</option>
+          <option value="video:240" data-i18n="quality_opt_240">240p</option>
+          <option value="video:144" data-i18n="quality_opt_144">144p</option>
+          <option value="audio" data-i18n="quality_opt_audio_mp3">Solo audio (MP3)</option>
+          <option value="audio:m4a" data-i18n="quality_opt_audio_m4a">Solo audio (M4A)</option>
+          <option value="audio:opus" data-i18n="quality_opt_audio_opus">Solo audio (OPUS)</option>
+        </select>
+      </div>
+      <button id="sendBtn" data-i18n="send_button">Enviar a YT-DLP Minimalist</button>
+      <div id="status"></div>
+    </div>
+  </div>
+
+  <div id="progressTab" class="tab-panel">
+    <div id="progressEmptyState" class="show">
+      <div id="progressEmptyText" data-i18n="progress_empty_title">No hay descargas en curso.</div>
+      <div id="progressEmptySubtext" data-i18n="progress_empty_subtext">Mandá un video desde la pestaña "Descargar" para verlo acá.</div>
+    </div>
+    <!-- Una <li class="progress-card"> por cada descarga en curso, agregada/
+         quitada dinámicamente desde popup.js (ver createCard/removeCard).
+         Al completarse, la tarjeta se desvanece sola y desaparece de acá;
+         el resultado final queda igual en la pestaña Historial. -->
+    <ul id="progressList"></ul>
+  </div>
+
+  <div id="historyTab" class="tab-panel">
+    <div id="historyToolbar">
+      <div id="historyFilters">
+        <button class="filter-btn active" data-filter="all" data-i18n="filter_all">Todos</button>
+        <button class="filter-btn" data-filter="completed" data-i18n="filter_completed">Completados</button>
+        <button class="filter-btn" data-filter="error" data-i18n="filter_error">Error</button>
+      </div>
+      <button id="clearHistoryBtn" title="Borrar historial" data-i18n-title="clear_history_title">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="3 6 5 6 21 6"></polyline>
+          <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path>
+          <path d="M10 11v6"></path>
+          <path d="M14 11v6"></path>
+          <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path>
+        </svg>
+      </button>
+    </div>
+    <div id="historyEmpty" data-i18n="history_empty">Todavía no enviaste ningún video.</div>
+    <ul id="historyList"></ul>
+  </div>
+
   <script src="url-utils.js"></script>
+  <script src="i18n.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

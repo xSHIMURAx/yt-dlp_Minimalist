@@ -1,4 +1,4 @@
-#ytdlp-minimalist-overlay {
+.ytdlp-minimalist-overlay {
   all: initial;
   position: fixed;
   z-index: 2147483647;
@@ -12,24 +12,28 @@
   cursor: grab;
 }
 
-#ytdlp-minimalist-overlay.is-dragging {
+.ytdlp-minimalist-overlay.is-dragging {
   cursor: grabbing;
   opacity: 0.85;
 }
 
-/* ---- Modo compacto: solo ícono, 50x20 ---- */
-#ytdlp-minimalist-overlay.mode-icon {
+/* ---- Modo compacto: solo ícono, 50x20 (33 botón + 17 cerrar) ---- */
+.ytdlp-minimalist-overlay.mode-icon {
   width: 50px;
   height: 20px;
 }
 
+.mode-icon .ytdlp-minimalist-btn {
+  flex: 0 0 33px;
+}
+
 /* ---- Modo con texto: ícono + "Descargar" ---- */
-#ytdlp-minimalist-overlay.mode-text {
+.ytdlp-minimalist-overlay.mode-text {
   height: 32px;
   border-radius: 7px;
 }
 
-#ytdlp-minimalist-btn {
+.ytdlp-minimalist-btn {
   all: unset;
   box-sizing: border-box;
   flex: 1 1 auto;
@@ -41,7 +45,7 @@
   cursor: pointer;
 }
 
-.mode-text #ytdlp-minimalist-btn {
+.mode-text .ytdlp-minimalist-btn {
   gap: 7px;
   padding: 0 13px;
   font-size: 12px;
@@ -50,28 +54,28 @@
   justify-content: flex-start;
 }
 
-#ytdlp-minimalist-btn:hover {
+.ytdlp-minimalist-btn:hover {
   background: #e4e4e4;
 }
 
-#ytdlp-minimalist-btn:disabled {
+.ytdlp-minimalist-btn:disabled {
   cursor: default;
   color: #5f5f5f;
 }
 
-#ytdlp-minimalist-btn.is-success {
+.ytdlp-minimalist-btn.is-success {
   color: #1e8e3e;
 }
 
-#ytdlp-minimalist-btn.is-error {
+.ytdlp-minimalist-btn.is-error {
   color: #d93025;
 }
 
-#ytdlp-minimalist-btn svg {
+.ytdlp-minimalist-btn svg {
   flex: none;
 }
 
-#ytdlp-minimalist-close {
+.ytdlp-minimalist-close {
   all: unset;
   box-sizing: border-box;
   flex: 0 0 17px;
@@ -86,12 +90,53 @@
   border-left: 1px solid rgba(0, 0, 0, 0.08);
 }
 
-.mode-text #ytdlp-minimalist-close {
+.mode-text .ytdlp-minimalist-close {
   flex-basis: 30px;
   font-size: 16px;
 }
 
-#ytdlp-minimalist-close:hover {
+.ytdlp-minimalist-close:hover {
   background: #e4e4e4;
   color: #1b1b1b;
+}
+
+/* ---- Menú de calidad (ahora se abre con clic derecho sobre
+   .ytdlp-minimalist-btn, ya no hay un botón "caret" aparte) ---- */
+.ytdlp-minimalist-quality-menu {
+  all: initial;
+  position: fixed;
+  z-index: 2147483647;
+  font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  background: #1c1c1c;
+  border: 1px solid #3a3a3a;
+  border-radius: 7px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+  padding: 4px;
+  min-width: 168px;
+  display: none;
+}
+
+.ytdlp-minimalist-quality-menu.open {
+  display: block;
+}
+
+.ytdlp-minimalist-quality-menu button {
+  all: unset;
+  box-sizing: border-box;
+  display: block;
+  width: 100%;
+  padding: 6px 9px;
+  font-size: 12px;
+  color: #e6e6e6;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.ytdlp-minimalist-quality-menu button:hover {
+  background: #2e2e2e;
+}
+
+.ytdlp-minimalist-quality-menu button.is-current {
+  color: #7ee0a0;
+  font-weight: 600;
 }
