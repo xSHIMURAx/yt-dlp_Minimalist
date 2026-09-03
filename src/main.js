@@ -228,6 +228,23 @@ function cleanupOrphanedPartialFiles(dir, sinceTime, depth = 0) {
 }
 
 let mainWindow;
+
+// Envía un mensaje IPC a la ventana principal solo si todavía existe y no fue
+// destruida. Varias descargas/actualizaciones siguen corriendo en segundo
+// plano (procesos hijos de yt-dlp/ffmpeg/etc.) incluso después de que la
+// ventana se cierra (ej. closeBehavior:'close' con una descarga activa); sin
+// esta guarda, el próximo evento de progreso llama a mainWindow.webContents
+// .send() sobre un webContents ya destruido y Electron tira "TypeError:
+// Object has been destroyed", que además queda repitiéndose por cada chunk
+// de stdout que siga llegando hasta que el proceso termine. Usar esta función
+// en TODOS los .send() evita ese crash sin tener que tocar cada call site
+// para acordarse de chequear mainWindow.isDestroyed() a mano.
+function sendToWindow(channel, payload) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send(channel, payload);
+  }
+}
+
 let tray = null;
 let trayShowWindow = null;
 // Se pone en true justo antes de un cierre real (desde el menú de la bandeja,
@@ -681,7 +698,7 @@ function updateSettingsFromExtension(patch) {
   const current = loadSettings();
   const merged = saveSettingsToDisk({ ...current, extensionKeepInBackground: !!patch.extensionKeepInBackground });
   if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send('settings:extension-updated', { extensionKeepInBackground: merged.extensionKeepInBackground });
+    sendToWindow('settings:extension-updated', { extensionKeepInBackground: merged.extensionKeepInBackground });
   }
   return { extensionKeepInBackground: merged.extensionKeepInBackground };
 }
@@ -1277,7 +1294,7 @@ let closeAskPending = false;
 function askCloseBehavior() {
   if (!mainWindow || closeAskPending) return;
   closeAskPending = true;
-  mainWindow.webContents.send('close:ask-behavior');
+  sendToWindow('close:ask-behavior');
 }
 
 ipcMain.on('close:behavior-response', (_event, payload) => {
@@ -1371,9 +1388,9 @@ function handleUrlFromExtension(url, title, quality, extId) {
     if (extId) {
       setExtensionDownload(extId, { status: 'starting', title: title || url, url, percent: 0 });
     }
-    mainWindow.webContents.send('extension:download', { url, title: title || '', quality, extId: extId || null });
+    sendToWindow('extension:download', { url, title: title || '', quality, extId: extId || null });
   } else {
-    mainWindow.webContents.send('extension:url', url);
+    sendToWindow('extension:url', url);
   }
 }
 
@@ -1643,7 +1660,7 @@ app.whenReady().then(() => {
   // está ahí (ej. primer arranque de la app), para que esté listo cuando el
   // usuario lance su primera descarga sin tener que ir a Actualizaciones.
   ensureManagedFfmpeg((progress) => {
-    if (mainWindow) mainWindow.webContents.send('update:progress', { target: 'ffmpeg', ...progress });
+    sendToWindow('update:progress', { target: 'ffmpeg', ...progress });
   }).catch((e) => {
     console.error('[ffmpeg] No se pudo descargar ffmpeg automáticamente:', e.message);
   });
@@ -1801,7 +1818,7 @@ ipcMain.handle('terminal:run', (_event, commandStr) => {
   terminalProc = proc;
 
   const send = (stream, text) => {
-    if (mainWindow) mainWindow.webContents.send('terminal:output', { stream, text });
+    sendToWindow('terminal:output', { stream, text });
   };
 
   proc.stdout.on('data', (chunk) => send('stdout', chunk.toString()));
@@ -1813,7 +1830,7 @@ ipcMain.handle('terminal:run', (_event, commandStr) => {
 
   proc.on('close', (code) => {
     if (terminalProc === proc) terminalProc = null;
-    if (mainWindow) mainWindow.webContents.send('terminal:done', { code });
+    sendToWindow('terminal:done', { code });
   });
 
   return { started: true };
@@ -2068,7 +2085,7 @@ ipcMain.handle('update:ytdlp', async () => {
     const url = getYtDlpDownloadUrl(settings.ytdlpChannel);
 
     await downloadFileFollowRedirects(url, dest, (progress) => {
-      if (mainWindow) mainWindow.webContents.send('update:progress', { target: 'ytdlp', ...progress });
+      sendToWindow('update:progress', { target: 'ytdlp', ...progress });
     });
 
     if (process.platform !== 'win32') fs.chmodSync(dest, 0o755);
@@ -2084,7 +2101,7 @@ ipcMain.handle('update:ffmpeg', async () => {
   try {
     ensureManagedBinDir();
     const onProgress = (progress) => {
-      if (mainWindow) mainWindow.webContents.send('update:progress', { target: 'ffmpeg', ...progress });
+      sendToWindow('update:progress', { target: 'ffmpeg', ...progress });
     };
 
     await downloadManagedFfmpeg(onProgress);
@@ -2100,7 +2117,7 @@ ipcMain.handle('update:deno', async () => {
   try {
     ensureManagedBinDir();
     await updateDeno((progress) => {
-      if (mainWindow) mainWindow.webContents.send('update:progress', { target: 'deno', ...progress });
+      sendToWindow('update:progress', { target: 'deno', ...progress });
     });
 
     const version = await getBinaryVersion(getManagedDenoPath(), ['--version']);
@@ -2297,7 +2314,7 @@ async function performDownload({ url, formatId, audioOnly, audioFormat, audioBit
   if (!ffmpegPath) {
     try {
       ffmpegPath = await ensureManagedFfmpeg((progress) => {
-        mainWindow.webContents.send('update:progress', { target: 'ffmpeg', ...progress });
+        sendToWindow('update:progress', { target: 'ffmpeg', ...progress });
       });
     } catch (e) {
       throw new Error('No se pudo descargar ffmpeg (necesario para combinar video y audio). Revisa tu conexión e inténtalo de nuevo, o descárgalo manualmente desde Configuración → Actualizaciones.');
@@ -2490,7 +2507,7 @@ async function performDownload({ url, formatId, audioOnly, audioFormat, audioBit
     // real (si es que llega) se muestra progreso indeterminado en vez de un 0%
     // que parece colgado. processStdoutLine lo apaga solo en cuanto ve un % real.
     if (isTrimmedDownload && downloadId !== undefined && downloadId !== null && mainWindow) {
-      mainWindow.webContents.send('app:progress', {
+      sendToWindow('app:progress', {
         id: downloadId,
         indeterminate: true,
         indeterminateLabelKey: isExactTrim ? 'status_trimming' : 'status_trimming_section',
@@ -2520,7 +2537,7 @@ async function performDownload({ url, formatId, audioOnly, audioFormat, audioBit
         const percentValue = parseFloat(percentMatch[1]);
         const speedValue = speedMatch ? speedMatch[1] : null;
         const etaValue = etaMatch ? etaMatch[1] : null;
-        mainWindow.webContents.send('app:progress', {
+        sendToWindow('app:progress', {
           id: downloadId,
           percent: percentValue,
           speed: speedValue,

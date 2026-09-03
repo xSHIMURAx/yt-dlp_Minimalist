@@ -62,8 +62,8 @@ Windows 10/11 (64-bit)
 
 Both files were scanned on VirusTotal and came back clean:
 
-- Installer: 0/49 detections — [View results](https://www.virustotal.com/gui/file/901158bf670a7331b5d605b2948b50afa200fd304d11adbdc6bb20fb506dec56?nocache=1)
-- Portable: 0/67 detections — [View results](https://www.virustotal.com/gui/file/b33c04f7ecfccd1bc24c5b9cf41ff9b61471b7b13d2b4a00d92b628c92bb3ea9?nocache=1)
+- Installer: 0/65 detections — [View results](https://www.virustotal.com/gui/file/634041b000c68517eeeb057cbda0fc49822581a2ea08442b14b7e988fbc4257a?nocache=1)
+- Portable: 0/63 detections — [View results](https://www.virustotal.com/gui/file/cf3b26a8bc6620b1ab5043e975f5db9955a188dc4a2db5a16bc13c9f3e02a346?nocache=1)
 - Extencion: 0/64 detections — [View results](https://www.virustotal.com/gui/file/5b6423342c7fd94f5dccdd311b4c212538e30d6de6d9ec8f8ff041eb27385151?nocache=1)
 
 ## Screenshots
