@@ -460,6 +460,7 @@ function getDefaultSettings() {
     rateLimit: '', // ej. "1M", "500K" — vacío = sin límite
     rateLimitMode: 'perFile', // 'perFile' = el límite se aplica a cada descarga | 'total' = se reparte entre las descargas simultáneas
     concurrentDownloads: 1, // cuántos videos de una lista se descargan a la vez
+    concurrentFragments: 1, // conexiones/fragmentos simultáneos POR descarga (-N / --concurrent-fragments); valores más altos aceleran descargas fragmentadas (HLS/DASH) pero pueden causar bloqueos temporales
     subtitlesEnabled: false, // descargar subtítulos (--write-subs) en descargas de video
     subtitleLangs: '', // códigos de idioma separados por coma para --sub-langs; vacío = todos ("all")
     subtitleMode: 'embed', // 'embed' = incrustados en el video | 'file' = archivo .srt aparte | 'both' = ambos
@@ -629,6 +630,8 @@ function loadSettings() {
     merged.subtitleMode = ['file', 'both'].includes(merged.subtitleMode) ? merged.subtitleMode : 'embed';
     merged.soundStyle = merged.soundStyle === 'windows' ? 'windows' : 'chime';
     merged.extensionKeepInBackground = merged.extensionKeepInBackground === true;
+    const fragments = parseInt(merged.concurrentFragments, 10);
+    merged.concurrentFragments = Number.isFinite(fragments) ? Math.min(16, Math.max(1, fragments)) : 1;
     return merged;
   } catch (e) {
     return defaults;
@@ -642,6 +645,9 @@ function saveSettingsToDisk(settings) {
   // Limitar a un rango razonable (1-5) para evitar saturar la red o el sistema
   const concurrent = parseInt(merged.concurrentDownloads, 10);
   merged.concurrentDownloads = Number.isFinite(concurrent) ? Math.min(5, Math.max(1, concurrent)) : 1;
+  // Conexiones/fragmentos simultáneos por descarga (-N): rango razonable 1-16
+  const fragments = parseInt(merged.concurrentFragments, 10);
+  merged.concurrentFragments = Number.isFinite(fragments) ? Math.min(16, Math.max(1, fragments)) : 1;
   merged.closeBehavior = ['ask', 'minimize', 'close'].includes(merged.closeBehavior) ? merged.closeBehavior : 'ask';
   merged.language = merged.language === 'en' ? 'en' : 'es';
   merged.rateLimitMode = merged.rateLimitMode === 'total' ? 'total' : 'perFile';
@@ -709,7 +715,7 @@ function detectCookieSite(url, customSites = []) {
 // tempFiles son rutas de archivos temporales en texto plano (descifrados)
 // que el llamador DEBE borrar con cleanupTempCookieFiles() apenas termine
 // ese proceso de yt-dlp (éxito, error o cancelación).
-function buildSettingsArgs(settings, url) {
+function buildSettingsArgs(settings, url, opts = {}) {
   const args = [];
   const tempFiles = [];
 
@@ -757,7 +763,15 @@ function buildSettingsArgs(settings, url) {
   }
 
   if (settings.rateLimit && settings.rateLimit.trim()) {
-    args.push('--limit-rate', computeEffectiveRateLimit(settings));
+    args.push('--limit-rate', computeEffectiveRateLimit(settings, opts.liveConcurrency));
+  }
+
+  // Conexiones/fragmentos simultáneos POR descarga (-N / --concurrent-fragments).
+  // Solo se agrega si es mayor a 1: con 1 (el default de yt-dlp) no hace falta
+  // pasar la bandera.
+  const fragments = parseInt(settings.concurrentFragments, 10);
+  if (Number.isFinite(fragments) && fragments > 1) {
+    args.push('-N', String(Math.min(16, Math.max(1, fragments))));
   }
 
   return { args, tempFiles };
@@ -844,16 +858,28 @@ function buildTrimArgs(trimSection) {
 // Calcula el valor que se le pasa a --limit-rate según el modo elegido en
 // Configuración → Descarga:
 // - "perFile": el valor tal cual, se aplica completo a cada descarga.
-// - "total": se reparte entre las "Descargas simultáneas" configuradas, para
-//   que la suma de todas las descargas en curso no supere el límite indicado.
-//   (Solo tiene efecto real durante descargas de playlist con concurrencia > 1;
-//   en descargas individuales, con un solo proceso, el resultado es el mismo
-//   que "por archivo".)
-function computeEffectiveRateLimit(settings) {
+// - "total": se reparte entre las descargas que estén corriendo AL MISMO
+//   TIEMPO en este momento (liveConcurrency, ver performDownload más abajo:
+//   se calcula a partir de activeProcs, así que cuenta por igual una
+//   descarga de playlist que una descarga suelta en paralelo — antes acá
+//   solo se miraba la config "Descargas simultáneas", que es específica de
+//   playlists, así que dos descargas sueltas en simultáneo (ej. dos videos
+//   distintos encolados a mano) no se repartían nada y cada una usaba el
+//   límite completo). Si no se pasa liveConcurrency (llamadas que no vienen
+//   de una descarga real en curso), se cae al valor de esa config como
+//   antes, de aproximación.
+//   Ojo: esto fija el reparto al VALOR que había al arrancar cada descarga.
+//   yt-dlp no permite cambiar --limit-rate de un proceso ya corriendo, así
+//   que si una descarga nueva arranca mientras otra ya viene corriendo, la
+//   que ya estaba no se reajusta hacia abajo — sí lo hace, correctamente,
+//   la que arranca después.
+function computeEffectiveRateLimit(settings, liveConcurrency) {
   const raw = settings.rateLimit.trim();
   if (settings.rateLimitMode !== 'total') return raw;
 
-  const concurrency = Math.max(1, Math.min(5, parseInt(settings.concurrentDownloads, 10) || 1));
+  const concurrency = Number.isFinite(liveConcurrency) && liveConcurrency > 0
+    ? Math.floor(liveConcurrency)
+    : Math.max(1, Math.min(5, parseInt(settings.concurrentDownloads, 10) || 1));
   if (concurrency <= 1) return raw;
 
   const match = raw.match(/^([\d.]+)\s*([a-zA-Z]*)$/);
@@ -2094,7 +2120,42 @@ ipcMain.handle('history:delete', (_event, id) => {
 
 ipcMain.handle('history:clear', () => saveHistoryToDisk([]));
 
+// Última carpeta de descarga configurada por el usuario en Ajustes (no la de
+// Windows por defecto, que puede no tener nada que ver si el usuario la
+// cambió). Se usa como último recurso cuando ni el archivo ni su carpeta
+// contenedora existen más.
+function getHistoryFallbackDir() {
+  const settings = loadSettings();
+  return settings.downloadPath && settings.downloadPath.trim()
+    ? settings.downloadPath.trim()
+    : path.join(os.homedir(), 'Downloads');
+}
+
+// Abre el archivo en sí con la app que el sistema tenga asociada (reproductor
+// de video, etc). Si el archivo exacto no está (se movió/borró, o el nombre
+// no se pudo leer bien de la salida de yt-dlp por temas de codificación con
+// caracteres especiales), caemos como mejor esfuerzo a mostrar la carpeta
+// contenedora en vez de fallar en silencio.
 ipcMain.on('history:open-file', (_event, filePath) => {
+  if (!filePath) return;
+
+  if (fs.existsSync(filePath)) {
+    shell.openPath(filePath);
+    return;
+  }
+
+  const parentDir = path.dirname(filePath);
+  if (parentDir && fs.existsSync(parentDir)) {
+    shell.openPath(parentDir);
+    return;
+  }
+
+  shell.openPath(getHistoryFallbackDir());
+});
+
+// Abre el explorador de archivos en la carpeta contenedora, con el archivo
+// seleccionado cuando es posible.
+ipcMain.on('history:open-folder', (_event, filePath) => {
   if (!filePath) return;
 
   // Camino normal: el archivo sigue ahí, se lo mostramos seleccionado en el
@@ -2115,14 +2176,7 @@ ipcMain.on('history:open-file', (_event, filePath) => {
     return;
   }
 
-  // Último recurso: la carpeta de descarga configurada por el usuario en
-  // Ajustes (no la de Windows por defecto, que puede no tener nada que ver
-  // si el usuario la cambió).
-  const settings = loadSettings();
-  const fallbackDir = settings.downloadPath && settings.downloadPath.trim()
-    ? settings.downloadPath.trim()
-    : path.join(os.homedir(), 'Downloads');
-  shell.openPath(fallbackDir);
+  shell.openPath(getHistoryFallbackDir());
 });
 
 // ---- Lógica de descarga con yt-dlp ----
@@ -2277,7 +2331,14 @@ async function performDownload({ url, formatId, audioOnly, audioFormat, audioBit
   const overwriteArgs = ['--force-overwrites'];
   // Cookies (navegador/archivo/login) y límite de velocidad, según Configuración de Descarga.
   // Las cookies se eligen automáticamente según el sitio detectado en el link.
-  const { args: settingsArgs, tempFiles } = buildSettingsArgs(settings, url);
+  // liveConcurrency: cuántas descargas (de cualquier tipo: playlist o suelta)
+  // están corriendo ahora mismo, +1 por esta misma que está por arrancar —
+  // ver computeEffectiveRateLimit. Se usa un Set de los procesos (no
+  // activeProcs.size directo) porque un mismo proceso puede estar indexado
+  // dos veces ahí (por downloadId y por extId cuando la descarga vino de la
+  // extensión del navegador), y size contaría esa descarga dos veces.
+  const liveConcurrency = new Set(activeProcs.values()).size + 1;
+  const { args: settingsArgs, tempFiles } = buildSettingsArgs(settings, url, { liveConcurrency });
   const cookieContext = getCookieContextForUrl(settings, url);
   // Contenedor de salida elegido en la IU (columna "Formato"). Whitelist para
   // no pasarle a yt-dlp/ffmpeg un valor arbitrario; si no viene o no es válido, mp4 por defecto.

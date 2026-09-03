@@ -6,7 +6,7 @@
 
 <p align="center">
   <img alt="Platform" src="https://img.shields.io/badge/platform-Windows%2010%2F11-0078D6?logo=windows&logoColor=white">
-  <img alt="Version" src="https://img.shields.io/badge/version-1.1.0-brightgreen">
+  <img alt="Version" src="https://img.shields.io/badge/version-1.2.0-brightgreen">
   <img alt="License" src="https://img.shields.io/badge/license-MIT-blue">
   <img alt="Built with Electron" src="https://img.shields.io/badge/built%20with-Electron-47848F?logo=electron&logoColor=white">
   <a href="https://www.virustotal.com/gui/file/7c7fc13230e9f467810dba4b27239d1f248e36d2f8888a00b710703aaefac938?nocache=1">
@@ -34,10 +34,14 @@
 
 - 🎬 **Video, audio, or full playlists** — pick the format and quality you want, per download or by preset.
 - 🖥️ **Terminal-style UI** — a clean, minimalist interface with a live terminal mode for the curious.
+- 🗂️ **Sidebar navigation** — a collapsible sidebar (new in 1.2.0) gives quick access to a new task, Terminal, Tasks (downloads/history), and Settings, each as its own full page instead of a floating popup.
 - 🧩 **Companion browser extension** — send the current tab straight to the app, no copy-pasting URLs.
-- 🍪 **Cookie support** — download age-restricted or private content you have access to.
+- 🍪 **Cookie support** — download age-restricted or private content you have access to, with an inline hint next to the URL field telling you when cookies are needed.
 - ⚙️ **Presets** — save your favorite format/quality combinations for one-click downloads.
+- 🚀 **Concurrent connections per download** — new **Concurrent connections** setting (`-N` / `--concurrent-fragments`, 1–16) speeds up fragmented (HLS/DASH) downloads.
 - 🗂️ **Organize by site** — optionally save each download into a per-site subfolder (e.g. `Downloads/Youtube`, `Downloads/TikTok`) so your download folder stays tidy.
+- ⏱️ **Smarter shared rate limit** — "Total" rate-limit mode now splits the bandwidth cap across whatever downloads are actually running at the same time, not just the configured playlist concurrency.
+- 📂 **Open file or open folder** — history entries now have separate actions to open the downloaded file directly or reveal it in its folder.
 - 🔄 **Automatic binary updates** — `yt-dlp`, `ffmpeg`, and Deno stay up to date on their own.
 - 📦 **Portable or installer** — use it however you prefer, no forced installation.
 - 🔒 **100% local** — everything runs on your machine; nothing is uploaded anywhere.
@@ -46,8 +50,8 @@
 
 | File | Description |
 |---|---|
-| **YT-DLP Minimalist Setup 1.1.0.exe** | Installer — recommended for most users |
-| **YT-DLP Minimalist 1.1.0 Portable.exe** | Portable version — no installation required |
+| **YT-DLP Minimalist Setup 1.2.0.exe** | Installer — recommended for most users |
+| **YT-DLP Minimalist 1.2.0 Portable.exe** | Portable version — no installation required |
 | **[YT-DLP_Minimalist_Extension.zip](https://pixeldrain.com/u/A5skyrPp)** | Companion browser extension (Chrome/Edge/Chromium) — see [Browser Extension](#browser-extension) |
 
 ### Requirements
@@ -58,8 +62,8 @@ Windows 10/11 (64-bit)
 
 Both files were scanned on VirusTotal and came back clean:
 
-- Installer: 0/60 detections — [View results](https://www.virustotal.com/gui/file/3086f00121d1d2eb3c796acff9b04c28f4f64092affdd8761d1c04ca6cc082e8?nocache=1)
-- Portable: 0/60 detections — [View results](https://www.virustotal.com/gui/file/22b6eab05c51974cfcbc93d04a918582824b208d81573b7b50a4680276785534?nocache=1)
+- Installer: 0/49 detections — [View results](https://www.virustotal.com/gui/file/901158bf670a7331b5d605b2948b50afa200fd304d11adbdc6bb20fb506dec56?nocache=1)
+- Portable: 0/67 detections — [View results](https://www.virustotal.com/gui/file/b33c04f7ecfccd1bc24c5b9cf41ff9b61471b7b13d2b4a00d92b628c92bb3ea9?nocache=1)
 - Extencion: 0/64 detections — [View results](https://www.virustotal.com/gui/file/5b6423342c7fd94f5dccdd311b4c212538e30d6de6d9ec8f8ff041eb27385151?nocache=1)
 
 ## Screenshots
@@ -76,29 +80,29 @@ Both files were scanned on VirusTotal and came back clean:
 
 ![Download Playlist](screenshots/02.png)
 
-**Downloads in progress**
+**Terminal mode**
 
-![Downloads in progress](screenshots/03.png)
+![Terminal](screenshots/03.png)
+
+**Active Downloads**
+
+![Active Downloads](screenshots/04.png)
 
 **General Settings**
 
-![General Settings](screenshots/04.png)
+![General Settings](screenshots/05.gif)
 
 **Download Settings**
 
-![Download Settings](screenshots/05.png)
+![Download Settings](screenshots/06.gif)
 
 **Cookies**
 
-![Cookies](screenshots/06.png)
+![Cookies](screenshots/07.png)
 
 **Presets**
 
-![Presets](screenshots/07.png)
-
-**Terminal mode**
-
-![Terminal](screenshots/08.png)
+![Presets](screenshots/08.png)
 
 **Updates Panel**
 
@@ -218,6 +222,11 @@ most failures are fixed by grabbing the latest `yt-dlp` build.
 Yes — enable **Organize into per-site subfolders** in **Settings → Downloads** and each file
 will be saved under a subfolder named after its site (e.g. `Downloads/Youtube`,
 `Downloads/TikTok`) inside your chosen download path.
+
+**How do I speed up a slow or fragmented download?**
+Raise **Concurrent connections** in **Settings → Downloads** (1–16). It maps to yt-dlp's `-N` /
+`--concurrent-fragments` flag and mainly helps HLS/DASH downloads. Higher values can speed
+things up, but setting it too high may cause temporary throttling from the source site.
 
 ## Contributing
 

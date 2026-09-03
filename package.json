@@ -1,6 +1,6 @@
 {
   "name": "yt-dlp-interface",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "YT-DLP Minimalist — versión de escritorio",
   "main": "src/main.js",
   "author": "✿ S H I M U R A ✿",

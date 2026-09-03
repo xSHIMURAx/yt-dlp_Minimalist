@@ -68,7 +68,8 @@ contextBridge.exposeInMainWorld('yoinksAPI', {
   deleteHistoryItem: (id) => ipcRenderer.invoke('history:delete', id),
   clearHistory: () => ipcRenderer.invoke('history:clear'),
   openHistoryFile: (filePath) => ipcRenderer.send('history:open-file', filePath),
-  showInFolder: (filePath) => ipcRenderer.send('history:open-file', filePath),
+  openHistoryFolder: (filePath) => ipcRenderer.send('history:open-folder', filePath),
+  showInFolder: (filePath) => ipcRenderer.send('history:open-folder', filePath),
   // Convierte una ruta local (ej. "C:\Users\...\video.mp4") a un file:// URL
   // válido para el src del <video> del modal de previsualización. Se hace acá
   // (preload, con acceso a Node) porque el renderer no tiene el módulo 'url'.

@@ -240,31 +240,58 @@ const playlistCreateFolderCheckbox = document.getElementById('playlist-create-fo
 // '' = usar la carpeta predeterminada de Configuración de Descarga
 let playlistCustomPath = '';
 
-// ---- Pantallas (home / picker), como en yoinks ----
+// ---- Pantallas (home / picker / playlist / actividad), como en yoinks ----
 const screenHome = document.getElementById('screen-home');
 const screenPicker = document.getElementById('screen-picker');
+const screenActivity = document.getElementById('screen-activity');
+const screenSettings = document.getElementById('screen-settings');
+const screenTerminal = document.getElementById('screen-terminal');
 
 // Mide cuánto contenido real tiene la pantalla de video (título largo,
 // formatos, etc.) y le pide a main.js que agrande la ventana lo necesario
 // para que se vea todo sin scroll. Se llama tras poblar la pantalla y de
 // nuevo tras cargar los datos del video (el título puede tardar en llegar).
-function goToPickerScreen() {
+// Refleja en la barra lateral cuál de las dos tarjetas ("Nueva tarea" /
+// "Tareas") corresponde a la pantalla que está visible en este momento.
+function updateSidebarActiveStates() {
+  const sidebarNewTaskBtn = document.getElementById('sidebar-new-task');
+  const sidebarTerminalBtn = document.getElementById('sidebar-terminal');
+  if (sidebarNewTaskBtn) sidebarNewTaskBtn.classList.toggle('active', screenHome.classList.contains('active'));
+  if (sidebarTerminalBtn) sidebarTerminalBtn.classList.toggle('active', screenTerminal.classList.contains('active'));
+  if (btnActivity) btnActivity.classList.toggle('active', screenActivity.classList.contains('active'));
+  if (settingsBtn) settingsBtn.classList.toggle('active', screenSettings.classList.contains('active'));
+}
+
+// Desactiva las 5 pantallas para que, al activar la nueva, no queden dos
+// superpuestas (cada goTo*Screen la llama antes de activar la suya).
+function deactivateAllScreens() {
   screenHome.classList.remove('active');
+  screenPicker.classList.remove('active');
+  screenPlaylist.classList.remove('active');
+  screenActivity.classList.remove('active');
+  screenSettings.classList.remove('active');
+  screenTerminal.classList.remove('active');
+}
+
+function goToPickerScreen() {
+  deactivateAllScreens();
   screenPicker.classList.add('active');
+  updateSidebarActiveStates();
   setTimeout(() => downloadListEl.focus(), 180);
 }
 
 function goToHomeScreen() {
-  screenPicker.classList.remove('active');
-  screenPlaylist.classList.remove('active');
+  deactivateAllScreens();
   screenHome.classList.add('active');
   setStatus('', '', 'picker');
+  updateSidebarActiveStates();
   setTimeout(() => input.focus(), 180);
 }
 
 function goToPlaylistScreen() {
-  screenHome.classList.remove('active');
+  deactivateAllScreens();
   screenPlaylist.classList.add('active');
+  updateSidebarActiveStates();
 }
 
 playlistBackBtn.addEventListener('click', goToHomeScreen);
@@ -283,18 +310,16 @@ function getPlaylistId(url) {
 
 backBtn.addEventListener('click', goToHomeScreen);
 
-// Elementos de presets (panel ⚙)
+// Elementos de la pantalla de Configuración (pestañas, como en Tareas)
 const settingsBtn = document.getElementById('btn-presets');
-const settingsMenu = document.getElementById('settings-menu');
-const menuGeneral = document.getElementById('menu-general');
-const menuDownload = document.getElementById('menu-download');
-const menuCookies = document.getElementById('menu-cookies');
-const menuPresets = document.getElementById('menu-presets');
-const menuTerminal = document.getElementById('menu-terminal');
-const menuUpdates = document.getElementById('menu-updates');
-const menuAbout = document.getElementById('menu-about');
+const settingsCloseBtn = document.getElementById('settings-close-btn');
+const settingsTabGeneral = document.getElementById('settings-tab-general');
+const settingsTabDownload = document.getElementById('settings-tab-download');
+const settingsTabCookies = document.getElementById('settings-tab-cookies');
+const settingsTabPresets = document.getElementById('settings-tab-presets');
+const settingsTabUpdates = document.getElementById('settings-tab-updates');
+const settingsTabAbout = document.getElementById('settings-tab-about');
 const presetsOverlay = document.getElementById('presets-overlay');
-const presetsCloseBtn = document.getElementById('presets-close-btn');
 const presetsTbody = document.getElementById('presets-tbody');
 const presetSiteInput = document.getElementById('preset-site');
 const presetNameInput = document.getElementById('preset-name');
@@ -306,11 +331,11 @@ const presetsReferenceBtn = document.getElementById('presets-reference-btn');
 
 // Elementos del panel de Terminal (ejecutar un comando de yt-dlp "en crudo")
 const terminalOverlay = document.getElementById('terminal-overlay');
-const terminalCloseBtn = document.getElementById('terminal-close-btn');
 const terminalOutputEl = document.getElementById('terminal-output');
 const terminalCommandInput = document.getElementById('terminal-command-input');
 const terminalRunBtn = document.getElementById('terminal-run-btn');
-const terminalStopBtn = document.getElementById('terminal-stop-btn');
+const terminalClearInputBtn = document.getElementById('terminal-clear-input-btn');
+const terminalClearOutputBtn = document.getElementById('terminal-clear-output-btn');
 const terminalQuickCommandsEl = document.getElementById('terminal-quick-commands');
 const terminalReferenceBtn = document.getElementById('terminal-reference-btn');
 const terminalReferenceOverlay = document.getElementById('terminal-reference-overlay');
@@ -320,7 +345,6 @@ const terminalReferenceListEl = document.getElementById('terminal-reference-list
 
 // Elementos de Configuración de Descarga (panel ⚙ → Download)
 const downloadSettingsOverlay = document.getElementById('download-settings-overlay');
-const downloadSettingsCloseBtn = document.getElementById('download-settings-close-btn');
 const downloadSettingsSaveBtn = document.getElementById('download-settings-save-btn');
 const downloadSettingsResetBtn = document.getElementById('download-settings-reset-btn');
 const settingDownloadPathInput = document.getElementById('setting-download-path');
@@ -345,6 +369,7 @@ const settingLoginStatusEl = document.getElementById('setting-login-status');
 const settingRateLimitInput = document.getElementById('setting-rate-limit');
 const settingRateLimitModeSelect = document.getElementById('setting-rate-limit-mode');
 const settingConcurrentDownloadsSelect = document.getElementById('setting-concurrent-downloads');
+const settingConcurrentFragmentsInput = document.getElementById('setting-concurrent-fragments');
 const settingSubtitlesEnabledCheckbox = document.getElementById('setting-subtitles-enabled');
 const settingSubtitleLangsInput = document.getElementById('setting-subtitle-langs');
 const settingSubtitleModeSelect = document.getElementById('setting-subtitle-mode');
@@ -361,19 +386,16 @@ const settingExtensionKeepInBackgroundCheckbox = document.getElementById('settin
 
 // Elementos del panel de Cookies (panel ⚙ → Cookies)
 const cookiesOverlay = document.getElementById('cookies-overlay');
-const cookiesCloseBtn = document.getElementById('cookies-close-btn');
 const cookiesSaveBtn = document.getElementById('cookies-save-btn');
 const cookiesResetBtn = document.getElementById('cookies-reset-btn');
 
 // Elementos del panel General (panel ⚙ → General)
 const generalOverlay = document.getElementById('general-overlay');
-const generalCloseBtn = document.getElementById('general-close-btn');
 const generalSaveBtn = document.getElementById('general-save-btn');
 const generalResetBtn = document.getElementById('general-reset-btn');
 
 // Elementos del panel de Actualizaciones (yt-dlp / FFmpeg)
 const updatesOverlay = document.getElementById('updates-overlay');
-const updatesCloseBtn = document.getElementById('updates-close-btn');
 const updatesStatusEl = document.getElementById('updates-status');
 const settingYtdlpChannelSelect = document.getElementById('setting-ytdlp-channel');
 const updateYtdlpVersionEl = document.getElementById('update-ytdlp-version');
@@ -407,7 +429,6 @@ let lastUpdateCheck = { ytdlpUpdateAvailable: false, ffmpegUpdateAvailable: fals
 // Elementos del panel de Actividad (Descargas en curso + Historial, unificados con pestañas)
 const btnActivity = document.getElementById('btn-activity');
 const downloadsBadge = document.getElementById('downloads-badge');
-const activityOverlay = document.getElementById('activity-overlay');
 const activityCloseBtn = document.getElementById('activity-close-btn');
 const activityTabDownloads = document.getElementById('activity-tab-downloads');
 const activityTabCompleted = document.getElementById('activity-tab-completed');
@@ -661,7 +682,7 @@ async function applyExtensionDownload(payload) {
     // arranca (sin esperar a que termine, ver comentario abajo), para que
     // se vea entrar sin que el usuario tenga que ir a buscarlo.
     startDownload(opt, { extId });
-    openActivityPanel('downloads');
+    goToActivityScreen('downloads');
   } catch (err) {
     setStatus(window.i18n.t('could_not_read_link', { error: err.message }), 'error', 'home');
   }
@@ -2841,75 +2862,143 @@ async function startDownload(opt, extraOptions) {
     document.querySelectorAll('.preset-dropdown-item').forEach(item => item.classList.remove('active'));
     // Si hay alguna pestaña basada en historial abierta (Historial, Completadas,
     // Error o Canceladas), refrescarla para que se vea la nueva entrada.
-    if (!activityOverlay.classList.contains('hidden') && HISTORY_TABS[activeActivityTab]) loadHistoryTab(activeActivityTab);
+    if (screenActivity.classList.contains('active') && HISTORY_TABS[activeActivityTab]) loadHistoryTab(activeActivityTab);
   }
 }
 
-// ================= MENU DROPDOWN DE CONFIGURACIÓN =================
+// ================= PANTALLA DE CONFIGURACIÓN (pestañas, página propia como Tareas) =================
 
-function toggleSettingsMenu() {
-  settingsMenu.classList.toggle('hidden');
+// Cada pestaña asocia su botón con la función que carga/muestra ese panel
+// (las mismas funciones open*Panel que antes abrían un overlay flotante:
+// siguen ocultando el resto de paneles ⚙/overlays y cargando sus datos,
+// solo que ahora el panel vive embebido en la pantalla en vez de flotar).
+const SETTINGS_TABS = {
+  general: { tabBtn: settingsTabGeneral, panelEl: document.getElementById('general-overlay'), open: () => openGeneralPanel() },
+  download: { tabBtn: settingsTabDownload, panelEl: document.getElementById('download-settings-overlay'), open: () => openDownloadSettingsPanel() },
+  cookies: { tabBtn: settingsTabCookies, panelEl: document.getElementById('cookies-overlay'), open: () => openCookiesPanel() },
+  presets: { tabBtn: settingsTabPresets, panelEl: document.getElementById('presets-overlay'), open: () => openPresetsPanel() },
+  updates: { tabBtn: settingsTabUpdates, panelEl: document.getElementById('updates-overlay'), open: () => openUpdatesPanel() },
+  about: { tabBtn: settingsTabAbout, panelEl: document.getElementById('about-overlay'), open: () => openAboutPanel() },
+};
+
+let activeSettingsTab = 'general';
+
+function setSettingsTab(tab) {
+  activeSettingsTab = tab;
+  Object.entries(SETTINGS_TABS).forEach(([key, { tabBtn, panelEl }]) => {
+    const isActive = key === tab;
+    tabBtn.classList.toggle('active', isActive);
+    panelEl.classList.toggle('hidden', !isActive);
+  });
+  // Carga/refresca los datos del panel activo (las mismas funciones que antes
+  // abrían el overlay flotante; el "cerrar los demás overlays ⚙" que hacían
+  // ya no aplica a estos 7 paneles, que ahora se ocultan arriba por pestaña).
+  SETTINGS_TABS[tab].open();
 }
 
-function closeSettingsMenu() {
-  settingsMenu.classList.add('hidden');
+// Configuración y Tareas comparten UNA sola "pantalla de retorno"
+// (returnScreen): la última pantalla "de contenido real" (Inicio, selección
+// de formato o Playlist) en la que estuvo el usuario. A propósito, Configuración
+// y Tareas NUNCA se guardan como returnScreen entre sí: si no fuera así, saltar
+// varias veces de Tareas a Configuración iría sobreescribiendo cuál era "la
+// pantalla anterior" de la otra, y el botón de volver quedaba rebotando para
+// siempre entre ambas sin llegar nunca a Inicio. Con una sola variable que
+// solo se actualiza al salir de una pantalla de contenido real, volver desde
+// Configuración o desde Tareas (sin importar cuántas veces se haya saltado
+// entre ambas) manda directo a Inicio, o a selección de formato/Playlist si
+// fue de ahí de donde se entró originalmente.
+let returnScreen = 'home';
+
+function getActiveScreenName() {
+  if (screenPicker.classList.contains('active')) return 'picker';
+  if (screenPlaylist.classList.contains('active')) return 'playlist';
+  if (screenActivity.classList.contains('active')) return 'activity';
+  if (screenSettings.classList.contains('active')) return 'settings';
+  if (screenTerminal.classList.contains('active')) return 'terminal';
+  return 'home';
 }
 
-settingsBtn.addEventListener('click', toggleSettingsMenu);
-
-// Cerrar menú cuando se hace clic en cualquier lugar del documento
-document.addEventListener('click', (e) => {
-  if (!settingsBtn.contains(e.target) && !settingsMenu.contains(e.target)) {
-    closeSettingsMenu();
+// Guarda la pantalla actual como returnScreen, pero solo si es una pantalla
+// de contenido real (no Configuración, Tareas ni Terminal rebotando entre sí).
+function rememberReturnScreen() {
+  const current = getActiveScreenName();
+  if (current !== 'settings' && current !== 'activity' && current !== 'terminal') {
+    returnScreen = current;
   }
-});
+}
 
-// Opción General: abre el panel General
-menuGeneral.addEventListener('click', () => {
-  closeSettingsMenu();
-  openGeneralPanel();
-});
+// Va a la pantalla de Configuración. Por defecto muestra "General".
+function goToSettingsScreen(tab = 'general') {
+  rememberReturnScreen();
+  deactivateAllScreens();
+  screenSettings.classList.add('active');
+  setSettingsTab(tab);
+  updateSidebarActiveStates();
+}
 
-// Opción Download: abre el panel de Configuración de Descarga
-menuDownload.addEventListener('click', () => {
-  closeSettingsMenu();
-  openDownloadSettingsPanel();
-});
+// Cierra Configuración volviendo a Inicio, selección de formato o Playlist
+// (la última pantalla de contenido real), nunca a Tareas.
+function closeSettingsScreen() {
+  switch (returnScreen) {
+    case 'picker':
+      goToPickerScreen();
+      break;
+    case 'playlist':
+      goToPlaylistScreen();
+      break;
+    default:
+      goToHomeScreen();
+  }
+}
 
-// Opción Cookies
-menuCookies.addEventListener('click', () => {
-  closeSettingsMenu();
-  openCookiesPanel();
-});
+settingsBtn.addEventListener('click', () => goToSettingsScreen('general'));
+settingsCloseBtn.addEventListener('click', closeSettingsScreen);
 
-// Opción Presets
-menuPresets.addEventListener('click', () => {
-  closeSettingsMenu();
-  openPresetsPanel();
-});
-
-// Opción Terminal
-menuTerminal.addEventListener('click', () => {
-  closeSettingsMenu();
+// Va a la pantalla de Terminal (pantalla propia, ya no vive dentro de Configuración).
+// Usa la misma returnScreen que Configuración/Tareas (ver comentario junto a su
+// declaración): volver siempre manda a Inicio o a selección de formato/Playlist.
+function goToTerminalScreen() {
+  rememberReturnScreen();
+  closeAllOverlayPanels();
+  deactivateAllScreens();
+  screenTerminal.classList.add('active');
   openTerminalPanel();
-});
+  updateSidebarActiveStates();
+}
 
-// Opción Actualizaciones
-menuUpdates.addEventListener('click', () => {
-  closeSettingsMenu();
-  openUpdatesPanel();
-});
+function closeTerminalScreen() {
+  switch (returnScreen) {
+    case 'picker':
+      goToPickerScreen();
+      break;
+    case 'playlist':
+      goToPlaylistScreen();
+      break;
+    default:
+      goToHomeScreen();
+  }
+}
 
-// Opción Acerca de
-menuAbout.addEventListener('click', () => {
-  closeSettingsMenu();
-  openAboutPanel();
-});
+// ---- Barra lateral: tarjeta "Terminal" (acceso directo, sin pasar por Configuración) ----
+const sidebarTerminalBtn = document.getElementById('sidebar-terminal');
+if (sidebarTerminalBtn) {
+  sidebarTerminalBtn.addEventListener('click', () => goToTerminalScreen());
+}
+const terminalCloseBtn = document.getElementById('terminal-close-btn');
+if (terminalCloseBtn) {
+  terminalCloseBtn.addEventListener('click', closeTerminalScreen);
+}
+
+settingsTabGeneral.addEventListener('click', () => setSettingsTab('general'));
+settingsTabDownload.addEventListener('click', () => setSettingsTab('download'));
+settingsTabCookies.addEventListener('click', () => setSettingsTab('cookies'));
+settingsTabPresets.addEventListener('click', () => setSettingsTab('presets'));
+settingsTabUpdates.addEventListener('click', () => setSettingsTab('updates'));
+settingsTabAbout.addEventListener('click', () => setSettingsTab('about'));
 
 // ================= ACERCA DE (panel ⚙) =================
 
 const aboutOverlay = document.getElementById('about-overlay');
-const aboutCloseBtn = document.getElementById('about-close-btn');
 const aboutVersionEl = document.getElementById('about-version');
 const aboutFfmpegVersionEl = document.getElementById('about-ffmpeg-version');
 const aboutDenoVersionEl = document.getElementById('about-deno-version');
@@ -2970,17 +3059,6 @@ async function openAboutPanel() {
 function closeAboutPanel() {
   aboutOverlay.classList.add('hidden');
 }
-
-aboutCloseBtn.addEventListener('click', closeAboutPanel);
-aboutOverlay.addEventListener('click', (e) => {
-  if (e.target === aboutOverlay) closeAboutPanel();
-});
-
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && !aboutOverlay.classList.contains('hidden')) {
-    closeAboutPanel();
-  }
-});
 
 // ================= PRESETS (panel ⚙) =================
 
@@ -3093,25 +3171,94 @@ function closePresetsPanel() {
 // lugar (mismo patrón que pausar/cancelar una descarga normal).
 let terminalRunning = false;
 
-function terminalAppendLine(text, cssClass) {
-  if (!text) return;
+// yt-dlp actualiza el progreso de descarga con "\r" (retorno de carro: vuelve
+// al inicio de la línea y la reescribe), tal como lo haría cualquier
+// terminal real. Antes tratábamos cada trozo de texto como una línea nueva,
+// así que cada actualización de progreso (decenas por segundo) quedaba
+// como una línea aparte y el panel se llenaba de texto. Ahora imitamos una
+// terminal de verdad: mientras no llegue un salto de línea real ("\n"), la
+// línea en curso se guarda en un único <span> que se va reescribiendo; el
+// "\r" simplemente reinicia su contenido en vez de crear una línea nueva.
+// El "\n" sí cierra esa línea de forma definitiva (queda fija en el
+// historial) y empieza una línea en blanco para lo próximo que llegue.
+let terminalLineBuf = '';
+let terminalLineSpan = null;
+let terminalLineClass = null;
+
+function terminalEnsureLineSpan(cssClass) {
+  if (!terminalLineSpan || terminalLineClass !== cssClass) {
+    terminalLineSpan = document.createElement('span');
+    if (cssClass) terminalLineSpan.className = cssClass;
+    terminalLineClass = cssClass;
+    terminalOutputEl.appendChild(terminalLineSpan);
+  }
+  return terminalLineSpan;
+}
+
+function terminalCommitLine() {
+  terminalOutputEl.appendChild(document.createTextNode('\n'));
+  terminalLineSpan = null;
+  terminalLineBuf = '';
+  terminalLineClass = null;
+}
+
+function terminalAppendLine(rawText, cssClass) {
+  if (!rawText) return;
   const atBottom =
     terminalOutputEl.scrollTop + terminalOutputEl.clientHeight >= terminalOutputEl.scrollHeight - 4;
-  const span = document.createElement('span');
-  if (cssClass) span.className = cssClass;
-  span.textContent = text;
-  terminalOutputEl.appendChild(span);
-  // Solo auto-scrolleamos si el usuario ya estaba abajo del todo; si se
-  // desplazó hacia arriba a propósito para leer algo, no se lo interrumpe.
+  const text = rawText.replace(/\r\n/g, '\n'); // normaliza CRLF antes de procesar
+  let i = 0;
+  while (i < text.length) {
+    const nl = text.indexOf('\n', i);
+    const cr = text.indexOf('\r', i);
+    if (nl === -1 && cr === -1) {
+      terminalLineBuf += text.slice(i);
+      terminalEnsureLineSpan(cssClass).textContent = terminalLineBuf;
+      break;
+    }
+    if (cr !== -1 && (nl === -1 || cr < nl)) {
+      terminalLineBuf += text.slice(i, cr);
+      terminalEnsureLineSpan(cssClass).textContent = terminalLineBuf;
+      terminalLineBuf = ''; // "\r": el cursor vuelve al inicio, lo próximo reescribe la línea
+      i = cr + 1;
+    } else {
+      terminalLineBuf += text.slice(i, nl);
+      terminalEnsureLineSpan(cssClass).textContent = terminalLineBuf;
+      terminalCommitLine(); // "\n": línea definitiva, empieza una nueva
+      i = nl + 1;
+    }
+  }
   if (atBottom) terminalOutputEl.scrollTop = terminalOutputEl.scrollHeight;
+}
+
+// Borra todo el texto acumulado en el panel de salida (no afecta el
+// comando en curso ni el input): resetea también el buffer de línea
+// "en progreso" para que la próxima salida empiece de cero.
+function clearTerminalOutput() {
+  terminalOutputEl.textContent = '';
+  terminalLineBuf = '';
+  terminalLineSpan = null;
+  terminalLineClass = null;
+}
+
+// Borra el comando escrito en el input de la Terminal (no toca la salida).
+function clearTerminalInput() {
+  if (terminalRunning) return;
+  terminalCommandInput.value = '';
+  terminalCommandInput.focus();
 }
 
 function setTerminalRunning(running) {
   terminalRunning = running;
-  terminalRunBtn.disabled = running;
-  terminalRunBtn.classList.toggle('hidden', running);
-  terminalStopBtn.classList.toggle('hidden', !running);
   terminalCommandInput.disabled = running;
+  if (terminalClearInputBtn) terminalClearInputBtn.disabled = running;
+  // Un solo botón que alterna entre "Ejecutar" (estado normal) y
+  // "Detener" (estado corriendo, en rojo), en vez de mostrar/ocultar
+  // dos botones separados.
+  terminalRunBtn.classList.toggle('stop-state', running);
+  const key = running ? 'btn_terminal_stop' : 'btn_terminal_run';
+  terminalRunBtn.setAttribute('data-i18n', key);
+  terminalRunBtn.textContent = window.i18n.t(key);
 }
 
 function openTerminalPanel() {
@@ -3143,16 +3290,27 @@ async function runTerminalCommand() {
   }
 }
 
-// Botones de "comandos rápidos": rellenan el input con una plantilla común.
-// Si el usuario ya había escrito una URL, se conserva y se agrega al final
-// de la plantilla en vez de perderla.
+// Combina un nuevo fragmento de comando (de un chip rápido o del panel
+// "+Comandos") con lo que ya hay escrito en el input de la Terminal, en
+// vez de reemplazarlo: conserva las banderas ya puestas, agrega las
+// nuevas al final, y mantiene la URL (si había una) siempre al final
+// de todo.
+function appendCommandToTerminalInput(current, addition) {
+  const urlMatch = current.match(/https?:\/\/\S+/);
+  const url = urlMatch ? urlMatch[0] : '';
+  const flagsOnly = current.replace(/https?:\/\/\S+/, '').trim();
+  const newFlags = flagsOnly ? `${flagsOnly} ${addition}` : addition;
+  return url ? `${newFlags} ${url}` : `${newFlags} `;
+}
+
+// Botones de "comandos rápidos": agregan su plantilla a lo ya escrito en
+// el input (sin borrar banderas previas). Si el usuario ya había escrito
+// una URL, se conserva y queda siempre al final del comando.
 terminalQuickCommandsEl.addEventListener('click', (e) => {
   const chip = e.target.closest('.terminal-chip');
   if (!chip || terminalRunning) return;
   const template = chip.dataset.command || '';
-  const current = terminalCommandInput.value;
-  const urlMatch = current.match(/https?:\/\/\S+/);
-  terminalCommandInput.value = urlMatch ? `${template} ${urlMatch[0]}` : `${template} `;
+  terminalCommandInput.value = appendCommandToTerminalInput(terminalCommandInput.value, template);
   terminalCommandInput.focus();
   terminalCommandInput.selectionStart = terminalCommandInput.selectionEnd = terminalCommandInput.value.length;
 });
@@ -3232,16 +3390,14 @@ function renderTerminalReferenceList(filterText) {
 
       // Botón "Usar": inserta el comando en el input de destino (Terminal o
       // el campo "Opciones" de Preajustes, según desde dónde se abrió el
-      // panel). En la Terminal conserva la URL si ya había una escrita;
-      // en Preajustes no aplica (ahí solo van opciones, sin URL) así que
-      // simplemente se agrega el comando al final del valor actual.
+      // panel). En ambos casos se agrega al final de lo ya escrito, sin
+      // reemplazarlo; en la Terminal, además, la URL (si había una) se
+      // conserva siempre al final de todo.
       useBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         const targetInput = terminalReferenceTargetInput || terminalCommandInput;
         if (targetInput === terminalCommandInput) {
-          const current = targetInput.value;
-          const urlMatch = current.match(/https?:\/\/\S+/);
-          targetInput.value = urlMatch ? `${item.cmd} ${urlMatch[0]}` : `${item.cmd} `;
+          targetInput.value = appendCommandToTerminalInput(targetInput.value, item.cmd);
         } else {
           const current = targetInput.value.trim();
           targetInput.value = current ? `${current} ${item.cmd}` : item.cmd;
@@ -3293,18 +3449,22 @@ terminalReferenceSearchEl.addEventListener('input', () => {
   renderTerminalReferenceList(terminalReferenceSearchEl.value);
 });
 
-terminalRunBtn.addEventListener('click', runTerminalCommand);
+terminalRunBtn.addEventListener('click', () => {
+  if (terminalRunning) {
+    window.yoinksAPI.stopTerminalCommand();
+  } else {
+    runTerminalCommand();
+  }
+});
 terminalCommandInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !terminalRunning) runTerminalCommand();
 });
-terminalStopBtn.addEventListener('click', () => {
-  window.yoinksAPI.stopTerminalCommand();
-});
-terminalCloseBtn.addEventListener('click', closeTerminalPanel);
-terminalOverlay.addEventListener('click', (e) => {
-  if (e.target === terminalOverlay) closeTerminalPanel();
-});
-
+if (terminalClearInputBtn) {
+  terminalClearInputBtn.addEventListener('click', clearTerminalInput);
+}
+if (terminalClearOutputBtn) {
+  terminalClearOutputBtn.addEventListener('click', clearTerminalOutput);
+}
 window.yoinksAPI.onTerminalOutput(({ stream, text }) => {
   terminalAppendLine(text, stream === 'stderr' ? 'terminal-line-stderr' : null);
 });
@@ -3317,23 +3477,16 @@ window.yoinksAPI.onTerminalDone(({ code }) => {
   terminalAppendLine(`\n${msg}\n\n`, 'terminal-line-system');
 });
 
-// El evento para abrir el panel ahora se maneja a través del menú dropdown
-// btnPresets.addEventListener('click', openPresetsPanel); <- REMOVIDO
-presetsCloseBtn.addEventListener('click', closePresetsPanel);
-presetsOverlay.addEventListener('click', (e) => {
-  if (e.target === presetsOverlay) closePresetsPanel();
-});
-
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
-  if (!activityOverlay.classList.contains('hidden')) {
-    closeActivityPanel();
-  } else if (!presetsOverlay.classList.contains('hidden')) {
-    closePresetsPanel();
-  } else if (!terminalReferenceOverlay.classList.contains('hidden')) {
+  if (!terminalReferenceOverlay.classList.contains('hidden')) {
     closeTerminalReferencePanel();
-  } else if (!terminalOverlay.classList.contains('hidden')) {
-    closeTerminalPanel();
+  } else if (screenSettings.classList.contains('active')) {
+    closeSettingsScreen();
+  } else if (screenActivity.classList.contains('active')) {
+    closeActivityScreen();
+  } else if (screenTerminal.classList.contains('active')) {
+    closeTerminalScreen();
   } else if (screenPicker.classList.contains('active')) {
     goToHomeScreen();
   }
@@ -3471,8 +3624,9 @@ function renderHistoryList(listEl, emptyEl, history) {
         ${entry.status === 'error' ? `<div class="history-item-error">${escapeHtml(entry.error || '')}</div>` : ''}
       </div>
       <div class="history-item-actions">
-        ${entry.url ? `<button class="history-redownload">${window.i18n.t('btn_redownload')}</button>` : ''}
         ${entry.status === 'success' ? `<button class="history-open">${window.i18n.t('btn_open')}</button>` : ''}
+        ${entry.url ? `<button class="history-redownload">${window.i18n.t('btn_redownload')}</button>` : ''}
+        ${entry.status === 'success' ? `<button class="history-open-folder">${window.i18n.t('btn_open_folder')}</button>` : ''}
         <button class="history-delete">${window.i18n.t('btn_delete')}</button>
       </div>
     `;
@@ -3486,6 +3640,9 @@ function renderHistoryList(listEl, emptyEl, history) {
     if (entry.status === 'success') {
       row.querySelector('.history-open').addEventListener('click', () => {
         window.yoinksAPI.openHistoryFile(entry.path);
+      });
+      row.querySelector('.history-open-folder').addEventListener('click', () => {
+        window.yoinksAPI.openHistoryFolder(entry.path);
       });
     }
 
@@ -3502,7 +3659,6 @@ function renderHistoryList(listEl, emptyEl, history) {
 // y abre el selector de formatos para elegir calidad y descargar de nuevo.
 function redownloadFromHistory(entry) {
   if (!entry.url) return;
-  closeActivityPanel();
   goToHomeScreen();
   input.value = entry.url;
   updateClearBtnVisibility();
@@ -3662,7 +3818,11 @@ function updateDownloadsSpeedSummary() {
   const downloading = activeDownloads.filter((d) => d.status === 'downloading');
 
   if (!downloading.length) {
-    downloadsSpeedSummaryEl.classList.add('hidden');
+    // Antes se ocultaba del todo; ahora queda siempre visible (permanente)
+    // para que la barra no aparezca/desaparezca y el resto del panel no
+    // salte de posición cada vez que arranca o termina una descarga.
+    downloadsSpeedSummaryTextEl.textContent = window.i18n.t('downloads_speed_summary_none');
+    downloadsSpeedSummaryEl.classList.remove('hidden');
     return;
   }
 
@@ -3675,7 +3835,7 @@ function updateDownloadsSpeedSummary() {
       : window.i18n.t('downloads_speed_summary_many', { n: downloading.length });
 
   downloadsSpeedSummaryTextEl.innerHTML = totalSpeedText
-    ? `${countLabel} · <strong>${escapeHtml(totalSpeedText)}</strong> ${window.i18n.t('downloads_speed_summary_total_suffix')}`
+    ? `${countLabel} · <strong>${escapeHtml(totalSpeedText)}</strong>`
     : countLabel;
 
   downloadsSpeedSummaryEl.classList.remove('hidden');
@@ -3999,8 +4159,10 @@ function renderDownloadsPanel() {
             : ''
         }
       </div>
-      ${actionButtons.length ? `<div class="history-item-actions">${actionButtons.join('')}</div>` : ''}
-      <span class="history-badge ${badgeClass}">${statusLabel}</span>
+      <div class="active-dl-trailing">
+        <span class="history-badge ${badgeClass}">${statusLabel}</span>
+        ${actionButtons.length ? `<div class="history-item-actions">${actionButtons.join('')}</div>` : ''}
+      </div>
     `;
 
     row.dataset.downloadId = String(d.id);
@@ -4047,22 +4209,74 @@ function setActivityTab(tab) {
   if (tab !== 'downloads') loadHistoryTab(tab);
 }
 
-// Abre el panel de Actividad. Por defecto muestra "Descargas en curso".
-function openActivityPanel(tab = 'downloads') {
+// Va a la pantalla de Actividad (Tareas). Por defecto muestra "Descargas en curso".
+// Usa la misma returnScreen que Configuración (ver comentario junto a su
+// declaración): así, sin importar cuántas veces se salte entre Tareas y
+// Configuración, volver siempre manda a Inicio o a selección de formato/Playlist.
+function goToActivityScreen(tab = 'downloads') {
+  rememberReturnScreen();
   closeAllOverlayPanels();
-  activityOverlay.classList.remove('hidden');
+  deactivateAllScreens();
+  screenActivity.classList.add('active');
   setActivityTab(tab);
+  updateSidebarActiveStates();
 }
 
-function closeActivityPanel() {
-  activityOverlay.classList.add('hidden');
+// Cierra Tareas volviendo a Inicio, selección de formato o Playlist
+// (la última pantalla de contenido real), nunca a Configuración.
+function closeActivityScreen() {
+  switch (returnScreen) {
+    case 'picker':
+      goToPickerScreen();
+      break;
+    case 'playlist':
+      goToPlaylistScreen();
+      break;
+    default:
+      goToHomeScreen();
+  }
 }
 
-btnActivity.addEventListener('click', () => openActivityPanel('downloads'));
-activityCloseBtn.addEventListener('click', closeActivityPanel);
-activityOverlay.addEventListener('click', (e) => {
-  if (e.target === activityOverlay) closeActivityPanel();
-});
+btnActivity.addEventListener('click', () => goToActivityScreen('downloads'));
+activityCloseBtn.addEventListener('click', closeActivityScreen);
+
+// ---- Barra lateral: tarjeta "Nueva tarea" ----
+// Si está en Configuración o en Tareas, primero vuelve a la pantalla desde
+// la que se entró (selección de formato, Playlist, etc.), igual que
+// "volver"/Esc; un segundo clic desde ahí ya lleva a la pantalla de pegar
+// el link.
+const sidebarNewTaskBtn = document.getElementById('sidebar-new-task');
+if (sidebarNewTaskBtn) {
+  sidebarNewTaskBtn.addEventListener('click', () => {
+    closeAllOverlayPanels();
+    if (screenSettings.classList.contains('active')) {
+      closeSettingsScreen();
+    } else if (screenActivity.classList.contains('active')) {
+      closeActivityScreen();
+    } else if (screenTerminal.classList.contains('active')) {
+      closeTerminalScreen();
+    } else {
+      goToHomeScreen();
+    }
+  });
+  updateSidebarActiveStates();
+}
+
+// ---- Barra lateral: botón ☰ para expandir/colapsar (como en FluentFlyout) ----
+const appSidebarEl = document.getElementById('app-sidebar');
+const sidebarToggleBtn = document.getElementById('sidebar-toggle');
+const SIDEBAR_EXPANDED_KEY = 'ytdlp-sidebar-expanded';
+
+if (appSidebarEl && sidebarToggleBtn) {
+  // Recuerda el estado elegido entre reinicios de la app.
+  if (localStorage.getItem(SIDEBAR_EXPANDED_KEY) === '1') {
+    appSidebarEl.classList.add('expanded');
+  }
+  sidebarToggleBtn.addEventListener('click', () => {
+    const expanded = appSidebarEl.classList.toggle('expanded');
+    localStorage.setItem(SIDEBAR_EXPANDED_KEY, expanded ? '1' : '0');
+  });
+}
 activityTabDownloads.addEventListener('click', () => setActivityTab('downloads'));
 activityTabCompleted.addEventListener('click', () => setActivityTab('completed'));
 activityTabError.addEventListener('click', () => setActivityTab('error'));
@@ -4344,6 +4558,7 @@ function applyDownloadSettingsToForm(settings) {
   settingRateLimitInput.value = settings.rateLimit || '';
   settingRateLimitModeSelect.value = settings.rateLimitMode === 'total' ? 'total' : 'perFile';
   settingConcurrentDownloadsSelect.value = String(settings.concurrentDownloads || 1);
+  settingConcurrentFragmentsInput.value = String(settings.concurrentFragments || 1);
 
   // Subtítulos/capítulos son opt-in (default apagado); miniaturas mantiene el
   // comportamiento histórico de la app (default prendido).
@@ -4372,11 +4587,6 @@ function openDownloadSettingsPanel() {
 function closeDownloadSettingsPanel() {
   downloadSettingsOverlay.classList.add('hidden');
 }
-
-downloadSettingsCloseBtn.addEventListener('click', closeDownloadSettingsPanel);
-downloadSettingsOverlay.addEventListener('click', (e) => {
-  if (e.target === downloadSettingsOverlay) closeDownloadSettingsPanel();
-});
 
 settingPathBrowseBtn.addEventListener('click', async () => {
   try {
@@ -4418,6 +4628,7 @@ downloadSettingsSaveBtn.addEventListener('click', async () => {
     rateLimit: settingRateLimitInput.value.trim(),
     rateLimitMode: settingRateLimitModeSelect.value === 'total' ? 'total' : 'perFile',
     concurrentDownloads: parseInt(settingConcurrentDownloadsSelect.value, 10) || 1,
+    concurrentFragments: Math.min(16, Math.max(1, parseInt(settingConcurrentFragmentsInput.value, 10) || 1)),
     subtitlesEnabled: settingSubtitlesEnabledCheckbox.checked,
     subtitleLangs: settingSubtitleLangsInput.value.trim(),
     subtitleMode: settingSubtitleModeSelect.value === 'file' || settingSubtitleModeSelect.value === 'both'
@@ -4432,7 +4643,6 @@ downloadSettingsSaveBtn.addEventListener('click', async () => {
   try {
     const saved = await window.yoinksAPI.saveSettings(settings);
     applyDownloadSettingsToForm(saved);
-    closeDownloadSettingsPanel();
   } catch (e) {
     // si falla el guardado, dejamos el panel abierto para que el usuario reintente
   }
@@ -4477,11 +4687,6 @@ function closeGeneralPanel() {
   generalOverlay.classList.add('hidden');
 }
 
-generalCloseBtn.addEventListener('click', closeGeneralPanel);
-generalOverlay.addEventListener('click', (e) => {
-  if (e.target === generalOverlay) closeGeneralPanel();
-});
-
 generalSaveBtn.addEventListener('click', async () => {
   // Traemos el resto de la configuración actual para no pisarla: este panel
   // solo debe tocar sonido y comportamiento al cerrar.
@@ -4504,7 +4709,6 @@ generalSaveBtn.addEventListener('click', async () => {
     applyGeneralSettingsToForm(saved);
     applyLanguage(saved.language === 'en' ? 'en' : 'es');
     if (window.yoinksAPI.setLanguage) window.yoinksAPI.setLanguage(saved.language === 'en' ? 'en' : 'es');
-    closeGeneralPanel();
   } catch (e) {
     // si falla el guardado, dejamos el panel abierto para que el usuario reintente
   }
@@ -4529,12 +4733,6 @@ if (window.yoinksAPI.onExtensionSettingsUpdated) {
     }
   });
 }
-
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && !generalOverlay.classList.contains('hidden')) {
-    closeGeneralPanel();
-  }
-});
 
 // ================= PANEL DE COOKIES (panel ⚙ → Cookies) =================
 
@@ -4578,11 +4776,6 @@ function closeCookiesPanel() {
   cookiesOverlay.classList.add('hidden');
 }
 
-cookiesCloseBtn.addEventListener('click', closeCookiesPanel);
-cookiesOverlay.addEventListener('click', (e) => {
-  if (e.target === cookiesOverlay) closeCookiesPanel();
-});
-
 cookiesSaveBtn.addEventListener('click', async () => {
   // Volcamos al borrador lo que haya quedado en el formulario del sitio visible
   // antes de armar el objeto final, para no perder la última edición.
@@ -4600,7 +4793,6 @@ cookiesSaveBtn.addEventListener('click', async () => {
   try {
     const saved = await window.yoinksAPI.saveSettings({ ...current, cookiesPerSite: cookiesDraft });
     applyCookiesSettingsToForm(saved.cookiesPerSite);
-    closeCookiesPanel();
   } catch (e) {
     // si falla el guardado, dejamos el panel abierto para que el usuario reintente
   }
@@ -4610,19 +4802,6 @@ cookiesResetBtn.addEventListener('click', () => {
   // Restablece solo el borrador en pantalla (a "Ninguna" en todos los sitios);
   // hay que presionar "Guardar" para que quede persistido.
   applyCookiesSettingsToForm(null);
-});
-
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && !cookiesOverlay.classList.contains('hidden')) {
-    closeCookiesPanel();
-  }
-});
-
-// Esc también cierra el panel de Configuración de Descarga
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && !downloadSettingsOverlay.classList.contains('hidden')) {
-    closeDownloadSettingsPanel();
-  }
 });
 
 // ================= ACTUALIZACIONES (panel ⚙ → Actualizaciones) =================
@@ -4734,18 +4913,18 @@ function hideStartupToast() {
 }
 
 // Al tocar el aviso inferior (ej. "Primera vez: instalando...") se abre
-// directamente el panel de Actualizaciones, donde ya se ven las barras de
-// progreso de yt-dlp/FFmpeg/Deno en vivo aunque la instalación haya
-// arrancado en segundo plano antes de abrir el panel.
+// directamente la pestaña de Actualizaciones (dentro de Configuración),
+// donde ya se ven las barras de progreso de yt-dlp/FFmpeg/Deno en vivo
+// aunque la instalación haya arrancado en segundo plano antes de abrirla.
 startupToast.addEventListener('click', () => {
   hideStartupToast();
-  openUpdatesPanel();
+  goToSettingsScreen('updates');
 });
 startupToast.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' || e.key === ' ') {
     e.preventDefault();
     hideStartupToast();
-    openUpdatesPanel();
+    goToSettingsScreen('updates');
   }
 });
 
@@ -4765,17 +4944,6 @@ function openUpdatesPanel() {
 function closeUpdatesPanel() {
   updatesOverlay.classList.add('hidden');
 }
-
-updatesCloseBtn.addEventListener('click', closeUpdatesPanel);
-updatesOverlay.addEventListener('click', (e) => {
-  if (e.target === updatesOverlay) closeUpdatesPanel();
-});
-
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && !updatesOverlay.classList.contains('hidden')) {
-    closeUpdatesPanel();
-  }
-});
 
 settingYtdlpChannelSelect.addEventListener('change', async () => {
   const channel = settingYtdlpChannelSelect.value;
