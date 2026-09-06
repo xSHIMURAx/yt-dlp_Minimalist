@@ -193,7 +193,7 @@
       btn_save: 'Guardar',
 
       general_title: 'General',
-      sound_on_finish: 'Sonido al terminar una descarga',
+      sound_on_finish: 'Sonido al terminar una descarga (éxito o error)',
       sound_hint: 'También suena al terminar de instalar yt-dlp/FFmpeg/Deno la primera vez que se abre la app.',
       settings_row_sound_style: 'Estilo de sonido',
       opt_sound_style_chime: 'Campanita',
@@ -588,7 +588,7 @@
       btn_save: 'Save',
 
       general_title: 'General',
-      sound_on_finish: 'Play sound when a download finishes',
+      sound_on_finish: 'Play sound when a download finishes (success or error)',
       sound_hint: 'Also plays when yt-dlp/FFmpeg/Deno finish installing automatically the first time the app is opened.',
       settings_row_sound_style: 'Sound style',
       opt_sound_style_chime: 'Chime',

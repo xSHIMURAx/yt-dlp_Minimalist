@@ -1172,6 +1172,25 @@ function addHistoryEntry(entry) {
   saveHistoryToDisk(history);
 }
 
+// Versión liviana del historial para el botón flotante de la extensión de
+// navegador (ver GET /downloaded en extension-server.js): solo lo mínimo
+// para poder reconocer "esta URL ya se descargó" del lado del content
+// script (url, videoId, extractorKey), sin mandar miniaturas ni rutas de
+// archivo por HTTP. A diferencia de sendHistory (que vive en
+// chrome.storage.local de la EXTENSIÓN y se completa recién cuando el
+// popup está abierto sondeando /progress — ver background.js de la
+// extensión), esto lee directo el historial real de la app, que se graba
+// apenas termina la descarga sin importar si el popup estaba abierto.
+function getDownloadedIdentifiersForExtension() {
+  const history = loadHistory();
+  const out = [];
+  for (const entry of history) {
+    if (!entry || entry.status !== 'success' || !entry.url) continue;
+    out.push({ url: entry.url, videoId: entry.videoId || null, extractorKey: entry.extractorKey || null });
+  }
+  return out;
+}
+
 // ---- Encabezados especiales para la vista previa en streaming ----
 // Algunos sitios (Bilibili es el caso típico) firman el link del video/audio,
 // pero además el CDN exige un Referer/User-Agent puntual en el pedido HTTP o
@@ -1651,6 +1670,7 @@ app.whenReady().then(() => {
       openFolderByPath,
       getSettings: getSettingsForExtension,
       updateSettings: updateSettingsFromExtension,
+      getDownloadedUrls: getDownloadedIdentifiersForExtension,
     });
   } catch (e) {
     console.error('[main] Error en startExtensionServer:', e);
@@ -2748,6 +2768,19 @@ ipcMain.on('app:pause', (_event, downloadId) => {
 
 ipcMain.on('app:cancel', (_event, downloadId) => {
   cancelDownloadById(downloadId);
+});
+
+// Contraparte "manual" de reportExt() (ver performDownload): la usa
+// renderer.js cuando el usuario pausa/cancela una descarga que vino de la
+// extensión pero que todavía está en cola (nunca arrancó su proceso de
+// yt-dlp) o que ya está pausada (su proceso ya se mató antes). En esos casos
+// no hay ningún cierre de proceso que dispare el reporte de estado solo, así
+// que sin esto extensionDownloads se queda con el último estado conocido
+// ("starting"/"downloading") para siempre, y la tarjeta de Progreso de la
+// extensión nunca se entera de que la descarga se pausó o canceló.
+ipcMain.on('app:mark-extension-download-status', (_event, extId, status) => {
+  if (!extId || (status !== 'paused' && status !== 'cancelled')) return;
+  setExtensionDownload(extId, { status });
 });
 
 // ---- Descargar y guardar metadatos + miniatura del video ----

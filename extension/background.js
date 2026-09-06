@@ -16,8 +16,19 @@ const PAUSE_ENDPOINT = `${APP_BASE}/pause`;
 const RESUME_ENDPOINT = `${APP_BASE}/resume`;
 const CANCEL_ENDPOINT = `${APP_BASE}/cancel`;
 const SETTINGS_ENDPOINT = `${APP_BASE}/settings`;
+const DOWNLOADED_ENDPOINT = `${APP_BASE}/downloaded`;
 const HISTORY_KEY = 'sendHistory';
 const HISTORY_LIMIT = 100; // no dejamos crecer el historial sin límite
+// Caché local del historial REAL de la app (ver GET /downloaded en
+// extension-server.js / getDownloadedIdentifiersForExtension en main.js):
+// a diferencia de HISTORY_KEY (que arriba se completa recién cuando el
+// popup sondea /progress y por eso solo terminaba de marcarse "completado"
+// si el popup había estado abierto), esto viene directo del history.json
+// de la app, que se graba apenas termina cada descarga sin importar si el
+// popup o el botón flotante siguen abiertos. content-overlay.js lee esta
+// clave (no golpea la red él mismo) para pintar "ya descargado".
+const APP_DOWNLOADED_KEY = 'appDownloadedUrls';
+const REFRESH_DOWNLOADED_ALARM = 'ytdlp-refresh-downloaded';
 // Misma clave que usa popup.js para retomar el estado al reabrirse. Se
 // guarda ACÁ (no solo en popup.js) porque una descarga puede arrancar desde
 // el botón flotante sobre el video (content-overlay.js) sin que el popup
@@ -36,6 +47,54 @@ async function addActiveDownload(entry) {
   list.push(entry);
   await chrome.storage.local.set({ [ACTIVE_DOWNLOADS_KEY]: list });
 }
+
+// Le pide a la app su historial real (GET /downloaded) y lo cachea en
+// storage.local para que content-overlay.js lo lea sin tener que golpear
+// la red él mismo. Se llama: al arrancar este service worker, por una
+// alarma periódica (funciona aunque el worker esté "dormido" y ningún
+// popup/pestaña esté abierta — ver chrome.alarms más abajo), a pedido
+// explícito de un content script recién inyectado (mensaje
+// 'refresh-downloaded-urls', para que el estado esté fresco apenas se abre
+// una página) y unos segundos después de mandar una descarga nueva (por si
+// termina rápido y el usuario sigue en la misma página).
+// Si la app no responde (cerrada, o el fetch falla), NO borramos la caché
+// existente: preferimos mostrar el último estado conocido antes que
+// "olvidar" descargas ya hechas solo porque la app está cerrada ahora mismo.
+async function refreshAppDownloadedUrls() {
+  try {
+    const res = await fetch(DOWNLOADED_ENDPOINT);
+    if (!res.ok) return;
+    const data = await res.json().catch(() => null);
+    const list = data && Array.isArray(data.downloaded) ? data.downloaded : null;
+    if (!list) return;
+    await chrome.storage.local.set({ [APP_DOWNLOADED_KEY]: list });
+  } catch (e) {
+    // App cerrada o sin conexión: dejamos la caché como estaba.
+  }
+}
+
+// chrome.alarms (a diferencia de setInterval) sigue disparando aunque este
+// service worker se haya "dormido" por inactividad, que es el caso típico
+// cuando no hay ningún popup ni pestaña de opciones abierta.
+chrome.alarms.create(REFRESH_DOWNLOADED_ALARM, { periodInMinutes: 1 });
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === REFRESH_DOWNLOADED_ALARM) refreshAppDownloadedUrls();
+});
+chrome.runtime.onStartup.addListener(refreshAppDownloadedUrls);
+chrome.runtime.onInstalled.addListener(refreshAppDownloadedUrls);
+// También al evaluarse este script (ej. el service worker se despierta
+// porque llegó cualquier mensaje), para no depender únicamente del próximo
+// tick de la alarma.
+refreshAppDownloadedUrls();
+
+// content-overlay.js manda esto una vez al inyectarse en una página nueva,
+// para que el primer render de sus botones ya use el dato más fresco
+// posible en vez de esperar hasta 1 minuto (el período de la alarma).
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (!message || message.type !== 'refresh-downloaded-urls') return;
+  refreshAppDownloadedUrls().then(() => sendResponse({ ok: true }));
+  return true;
+});
 
 // Agrega una entrada al historial (el más nuevo primero) y recorta el
 // tamaño. El panel lateral escucha chrome.storage.onChanged, así que no
@@ -147,6 +206,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         eta: null,
       });
       sendResponse({ ok: true, id });
+      // Por si esta descarga termina en pocos segundos y el usuario sigue
+      // en la misma página: adelanta el próximo refresco del historial real
+      // en vez de esperar hasta el próximo tick de la alarma (hasta 1 min).
+      setTimeout(refreshAppDownloadedUrls, 6000);
     })
     .catch(() => {
       // La app no estaba abierta (o no responde). No la lanzamos desde acá:
@@ -209,11 +272,20 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
   fetch(`${PROGRESS_ENDPOINT}?id=${encodeURIComponent(message.id)}`)
     .then((res) => {
+      // 404 acá significa algo muy distinto de "no pude conectarme": la app
+      // SÍ está corriendo y respondió, solo que ya no tiene en memoria esa
+      // descarga puntual (se limpió sola pasados 30 minutos sin novedades,
+      // ver EXTENSION_DOWNLOAD_TTL_MS en main.js, o la app se reinició desde
+      // entonces). Lo marcamos como "notFound" en vez de tratarlo igual que
+      // un fetch fallido: si no, el popup queda reintentando ese id PARA
+      // SIEMPRE (nunca llega un estado final), y la tarjeta correspondiente
+      // nunca se saca de la lista de Progreso.
+      if (res.status === 404) return res.json().then(() => ({ notFound: true }));
       if (!res.ok) throw new Error('bad status');
-      return res.json();
+      return res.json().then((data) => ({ ok: true, ...data }));
     })
-    .then((data) => sendResponse({ ok: true, ...data }))
-    .catch(() => sendResponse({ ok: false }));
+    .then((result) => sendResponse(result.ok ? result : { ok: false, notFound: !!result.notFound }))
+    .catch(() => sendResponse({ ok: false, notFound: false }));
 
   return true; // respuesta asíncrona
 });

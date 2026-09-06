@@ -71,6 +71,55 @@
   color: #d93025;
 }
 
+/* ---- Ya descargado antes (según el historial de la app) ---- */
+/* En modo texto: solo cambia color de ícono + la etiqueta pasa a "Ya
+   descargado" (ver content-overlay.js) — no hace falta más para que se
+   note. */
+.ytdlp-minimalist-btn.is-downloaded {
+  color: #3b9eff;
+}
+
+.ytdlp-minimalist-btn.is-downloaded:hover {
+  color: #1b1b1b;
+}
+
+/* En modo ícono compacto no hay lugar para texto, así que en vez de solo
+   teñir el ícono se pinta TODO el botón de azul — se nota de un vistazo,
+   sin tener que pasar el mouse para leer el tooltip. */
+.ytdlp-minimalist-overlay.mode-icon.is-downloaded {
+  background: #3b9eff;
+}
+
+.mode-icon.is-downloaded .ytdlp-minimalist-btn {
+  color: #ffffff;
+}
+
+.mode-icon.is-downloaded .ytdlp-minimalist-btn:hover {
+  background: #2f8bea;
+  color: #ffffff;
+}
+
+.mode-icon.is-downloaded .ytdlp-minimalist-close {
+  color: #eaf4ff;
+  border-left-color: rgba(255, 255, 255, 0.35);
+}
+
+.mode-icon.is-downloaded .ytdlp-minimalist-close:hover {
+  background: #2f8bea;
+  color: #ffffff;
+}
+
+/* Durante el envío (enviando/éxito/error) esos colores tienen prioridad
+   sobre el "ya descargado" — igual queda claro que YA se había descargado
+   antes por el fondo azul del botón, que no se toca. */
+.mode-icon.is-downloaded .ytdlp-minimalist-btn.is-success {
+  color: #d6ffe4;
+}
+
+.mode-icon.is-downloaded .ytdlp-minimalist-btn.is-error {
+  color: #ffd9d5;
+}
+
 .ytdlp-minimalist-btn svg {
   flex: none;
 }

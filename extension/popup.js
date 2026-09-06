@@ -19,7 +19,10 @@ const progressEmptyState = document.getElementById('progressEmptyState');
 // exactamente las tarjetas que había — ahora como lista, no como una sola
 // descarga "activa" que las demás pisaban.
 const ACTIVE_DOWNLOADS_KEY = 'activeDownloads';
-const TERMINAL_STATUSES = ['completed', 'error', 'cancelled'];
+// 'unknown' se agrega acá (además de completed/error/cancelled): es el
+// estado que le ponemos a una tarjeta cuando la app ya no tiene registrada
+// esa descarga (ver 'notFound' en pollOnce) — no hay nada más que sondear.
+const TERMINAL_STATUSES = ['completed', 'error', 'cancelled', 'unknown'];
 // Cuánto se deja la tarjeta mostrando su resultado final (✓ Completado /
 // Error / Cancelado) antes de desvanecerse sola y sacarse de la lista — así
 // el panel "se vacía" solo a medida que cada descarga termina, en vez de
@@ -232,7 +235,14 @@ function createCard(entry) {
   });
 
   cardsById.set(entry.id, refs);
-  progressListEl.appendChild(li);
+  // Va arriba de todo (no al final): así la descarga más reciente queda
+  // siempre visible sin tener que scrollear, y las anteriores se van
+  // corriendo hacia abajo a medida que se agregan nuevas. Esto también hace
+  // que, al reabrir el popup (ver el bloque que retoma "activeDownloads" más
+  // abajo), las tarjetas terminen ordenadas de más nueva a más vieja, ya que
+  // ese bloque llama a createCard en orden cronológico (la más vieja
+  // primero) y cada una va empujando a la anterior hacia abajo.
+  progressListEl.insertBefore(li, progressListEl.firstChild);
   updateEmptyState();
   return refs;
 }
@@ -266,6 +276,11 @@ function updateCard(id) {
     refs.statusText.textContent = t('cancelled_label', currentLang);
     refs.statusText.className = 'progress-status-text';
     refs.meta.textContent = '';
+  } else if (entry.status === 'unknown') {
+    refs.barFill.style.width = percent !== null ? `${percent}%` : '100%';
+    refs.statusText.textContent = t('progress_lost_label', currentLang);
+    refs.statusText.className = 'progress-status-text';
+    refs.meta.textContent = t('progress_lost_meta', currentLang);
   } else if (entry.status === 'paused') {
     refs.barFill.style.width = percent !== null ? `${percent}%` : '0%';
     refs.statusText.textContent = t('paused_label', currentLang);
@@ -390,10 +405,29 @@ function pollOnce(id, currentEntry) {
     // respuesta (ej. el usuario canceló y ya se procesó el estado final).
     if (!entriesById.has(id)) return;
 
+    if (response && response.notFound) {
+      // La app está corriendo y respondió, pero ya no tiene registrada esta
+      // descarga (pasaron más de 30 min sin novedades, o se reinició desde
+      // entonces — ver EXTENSION_DOWNLOAD_TTL_MS en main.js). A diferencia
+      // de "sin conexión" (donde sí tiene sentido seguir reintentando por si
+      // vuelve), acá reintentar para siempre no sirve de nada: este id no va
+      // a volver a existir. Lo tratamos como un final "desconocido" para que
+      // la tarjeta se saque sola, igual que completed/error/cancelled, y así
+      // la lista de Progreso deje de acumular tarjetas fantasma.
+      const merged = { ...currentEntry, status: 'unknown', notConnected: false };
+      entriesById.set(id, merged);
+      updateCard(id);
+      removeActiveDownloadFromStorage(id);
+      setTimeout(() => {
+        removeCard(id);
+        stopPollingIfIdle();
+      }, REMOVE_DELAY_MS);
+      return;
+    }
+
     if (!response || !response.ok) {
-      // La app puede no estar corriendo, o el id ya expiró del lado de la
-      // app (se reinició hace rato). No borramos el estado guardado por las
-      // dudas de que sea un corte momentáneo; seguimos reintentando.
+      // La app puede no estar corriendo. No borramos el estado guardado por
+      // las dudas de que sea un corte momentáneo; seguimos reintentando.
       const merged = { ...currentEntry, notConnected: true };
       entriesById.set(id, merged);
       updateCard(id);

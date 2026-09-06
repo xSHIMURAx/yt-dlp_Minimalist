@@ -2813,7 +2813,8 @@ async function startDownload(opt, extraOptions) {
     currentVideoInfo ? currentVideoInfo.title : label,
     label,
     payload,
-    payload.thumbnail
+    payload.thumbnail,
+    extId
   );
   setActiveDownloadStatus(downloadId, 'downloading');
   // Esta descarga pasa a ser la dueña del mensaje de estado del picker.
@@ -3685,7 +3686,7 @@ function isSelectableDownload(d) {
   return d.status === 'queued' || d.status === 'downloading' || d.status === 'paused';
 }
 
-function queueActiveDownload(title, label, payload, thumbnail) {
+function queueActiveDownload(title, label, payload, thumbnail, extId) {
   const id = ++downloadIdCounter;
   activeDownloads.push({
     id,
@@ -3697,6 +3698,14 @@ function queueActiveDownload(title, label, payload, thumbnail) {
     status: 'queued',
     payload: payload || null,
     thumbnail: thumbnail || (payload && payload.thumbnail) || null,
+    // Si esta descarga vino de la extensión del navegador, guardamos su id
+    // acá (además de mandarlo en el payload de window.yoinksAPI.download):
+    // cancelActiveDownload/pauseActiveDownload lo necesitan para avisarle al
+    // proceso principal en los casos en que NO hay ningún proceso de yt-dlp
+    // corriendo todavía (descarga en cola) o ya no lo hay (ya se pausó) —
+    // ahí no hay "cierre de proceso" que dispare reportExt(), así que sin
+    // esto la extensión se queda mostrando el estado viejo para siempre.
+    extId: extId || null,
   });
   renderDownloadsPanel();
   return id;
@@ -3856,14 +3865,15 @@ function finishActiveDownload(id, status) {
     d.percent = 100;
   }
   renderDownloadsPanel();
-  if (status === 'done') playNotificationSoundIfEnabled();
+  if (status === 'done') playNotificationSoundIfEnabled('success');
+  else if (status === 'error') playNotificationSoundIfEnabled('error');
   setTimeout(() => removeActiveDownload(id), 2500);
 }
 
 // ================= SONIDO DE NOTIFICACIÓN =================
-// Se reproduce al terminar una descarga (con éxito) y al terminar la
-// instalación automática de dependencias la primera vez. Respeta el
-// interruptor "Sonido" de Configuración.
+// Se reproduce al terminar una descarga (con éxito o con error) y al
+// terminar la instalación automática de dependencias la primera vez.
+// Respeta el interruptor "Sonido" de Configuración.
 // Mismo sonido "campanita" (dos notas ascendentes, sin archivos externos)
 // que usa el conversor de PDF Creator: se genera con la Web Audio API en
 // vez del pitido genérico del sistema (shell.beep) que se usaba antes.
@@ -3889,7 +3899,38 @@ function playSuccessChime() {
   });
 }
 
-async function playNotificationSoundIfEnabled() {
+// Contraparte de playSuccessChime para descargas que terminan en error: dos
+// notas DESCENDENTES (en vez de ascendentes) y con onda "square" en vez de
+// "sine", para que se distinga a simple oído del sonido de éxito sin tener
+// que mirar la pantalla.
+function playErrorChime() {
+  if (!notificationAudioContext) {
+    notificationAudioContext = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  const now = notificationAudioContext.currentTime;
+  const notes = [{ freq: 523.25, start: 0 }, { freq: 349.23, start: 0.12 }];
+  notes.forEach(({ freq, start }) => {
+    const oscillator = notificationAudioContext.createOscillator();
+    const gain = notificationAudioContext.createGain();
+    oscillator.type = 'square';
+    oscillator.frequency.value = freq;
+    gain.gain.setValueAtTime(0, now + start);
+    gain.gain.linearRampToValueAtTime(0.12, now + start + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + start + 0.3);
+    oscillator.connect(gain);
+    gain.connect(notificationAudioContext.destination);
+    oscillator.start(now + start);
+    oscillator.stop(now + start + 0.3);
+  });
+}
+
+// "kind": 'success' (default, para no romper los call sites existentes que
+// no lo pasan, ej. instalación de dependencias) o 'error'. Con soundStyle
+// 'windows' no hay forma de distinguir tonos (shell.beep es un único pitido
+// fijo del sistema operativo), así que ahí solo se pisa el pitido dos veces
+// seguidas cuando es error, para que al menos se note la diferencia.
+async function playNotificationSoundIfEnabled(kind) {
+  const isError = kind === 'error';
   try {
     const settings = await window.yoinksAPI.getSettings();
     if (!settings || settings.soundEnabled === false) return;
@@ -3897,9 +3938,13 @@ async function playNotificationSoundIfEnabled() {
       // Sonido del sistema de Windows (el pitido genérico que ya traía
       // Electron/el sistema operativo antes de agregar la campanita).
       await window.yoinksAPI.playNotificationSound();
+      if (isError) {
+        setTimeout(() => window.yoinksAPI.playNotificationSound(), 150);
+      }
       return;
     }
-    playSuccessChime();
+    if (isError) playErrorChime();
+    else playSuccessChime();
   } catch (e) {
     // Si la Web Audio API falla por lo que sea (poco probable en un
     // renderer de Electron), como último recurso caemos al pitido del
@@ -3944,6 +3989,15 @@ function pauseActiveDownload(id) {
     // para que el worker no lo empiece, y refleja "pausado" en la UI de inmediato.
     pausedBeforeStart.add(id);
     setActiveDownloadStatus(id, 'paused');
+    // No hay ningún proceso de yt-dlp corriendo todavía, así que nada del lado
+    // de main.js se va a enterar de este cambio por su cuenta (ver
+    // reportExt() en performDownload, que solo dispara al cerrarse un
+    // proceso real). Si esta descarga vino de la extensión, avisamos a mano
+    // para que su tarjeta de Progreso deje de mostrar "Descargando" y pase a
+    // "En pausa" en vez de quedarse pegada.
+    if (d.extId && window.yoinksAPI.markExtensionDownloadStatus) {
+      window.yoinksAPI.markExtensionDownloadStatus(d.extId, 'paused');
+    }
     return;
   }
   window.yoinksAPI.pauseDownload(id);
@@ -3957,12 +4011,25 @@ function cancelActiveDownload(id) {
     // Todavía no arrancó (esperando su turno en el pool de la playlist):
     // márcalo para que el worker lo salte cuando le toque, y quítalo ya de la lista.
     canceledBeforeStart.add(id);
+    // Mismo caso que en pauseActiveDownload de arriba: sin proceso que se
+    // cierre, reportExt() nunca se llama solo. Avisamos a mano para que la
+    // extensión (si esta descarga vino de ahí) saque su tarjeta de la lista
+    // de Progreso en vez de quedarse mostrando "Descargando 0%" para siempre.
+    if (d.extId && window.yoinksAPI.markExtensionDownloadStatus) {
+      window.yoinksAPI.markExtensionDownloadStatus(d.extId, 'cancelled');
+    }
     removeActiveDownload(id);
     return;
   }
   if (d.status === 'paused') {
     // Ya no hay proceso corriendo (se mató al pausar), así que no hay nada que
     // señalizar en el proceso principal: simplemente se quita de la lista.
+    // Mismo aviso a mano que arriba: al pausar ya se le había avisado a la
+    // extensión "paused", así que ahora hace falta corregirlo a "cancelled"
+    // o se queda mostrando "En pausa" para siempre.
+    if (d.extId && window.yoinksAPI.markExtensionDownloadStatus) {
+      window.yoinksAPI.markExtensionDownloadStatus(d.extId, 'cancelled');
+    }
     removeActiveDownload(id);
     return;
   }
@@ -3974,7 +4041,13 @@ async function resumeActiveDownload(id) {
   if (!d || !d.payload) return;
   setActiveDownloadStatus(id, 'downloading');
   try {
-    const result = await window.yoinksAPI.download({ ...d.payload, downloadId: id });
+    // Se manda extId también acá (no solo la primera vez en startDownload):
+    // si no, una descarga que vino de la extensión y se reanuda desde el
+    // botón "Reanudar" de la propia app pierde el vínculo con su tarjeta en
+    // el popup — quedaría de nuevo "pegada" en el último estado que la
+    // extensión llegó a ver antes de pausarse, en vez de reflejar que
+    // arrancó de nuevo.
+    const result = await window.yoinksAPI.download({ ...d.payload, downloadId: id, extId: d.extId || null });
     if (result && result.paused) {
       setActiveDownloadStatus(id, 'paused');
     } else if (result && result.canceled) {

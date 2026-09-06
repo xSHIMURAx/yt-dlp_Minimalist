@@ -6,10 +6,10 @@
 
 <p align="center">
   <img alt="Platform" src="https://img.shields.io/badge/platform-Windows%2010%2F11-0078D6?logo=windows&logoColor=white">
-  <img alt="Version" src="https://img.shields.io/badge/version-1.2.0-brightgreen">
+  <img alt="Version" src="https://img.shields.io/badge/version-1.3.0-brightgreen">
   <img alt="License" src="https://img.shields.io/badge/license-MIT-blue">
   <img alt="Built with Electron" src="https://img.shields.io/badge/built%20with-Electron-47848F?logo=electron&logoColor=white">
-  <a href="https://www.virustotal.com/gui/file/7c7fc13230e9f467810dba4b27239d1f248e36d2f8888a00b710703aaefac938?nocache=1">
+  <a href="https://www.virustotal.com/gui/file/eccdb220f860e3e4a23691973404bb3636e87dc8d3f1d94051693873b8c52581?nocache=1">
     <img alt="VirusTotal" src="https://img.shields.io/badge/VirusTotal-0%2F67%20detections-success?logo=virustotal&logoColor=white">
   </a>
 </p>
@@ -35,7 +35,8 @@
 - 🎬 **Video, audio, or full playlists** — pick the format and quality you want, per download or by preset.
 - 🖥️ **Terminal-style UI** — a clean, minimalist interface with a live terminal mode for the curious.
 - 🗂️ **Sidebar navigation** — a collapsible sidebar (new in 1.2.0) gives quick access to a new task, Terminal, Tasks (downloads/history), and Settings, each as its own full page instead of a floating popup.
-- 🧩 **Companion browser extension** — send the current tab straight to the app, no copy-pasting URLs.
+- 🧩 **Companion browser extension** — send the current tab straight to the app, no copy-pasting URLs. Its floating button now shows an **"already downloaded"** badge on videos you've grabbed before, and correctly hides itself behind real modals/dialogs (e.g. X's expanded video viewer) instead of floating on top of them.
+- 🔊 **Distinct error sound** — new in 1.3.0, a failed download now plays a different chime than a successful one, so you can tell them apart without looking at the screen.
 - 🍪 **Cookie support** — download age-restricted or private content you have access to, with an inline hint next to the URL field telling you when cookies are needed.
 - ⚙️ **Presets** — save your favorite format/quality combinations for one-click downloads.
 - 🚀 **Concurrent connections per download** — new **Concurrent connections** setting (`-N` / `--concurrent-fragments`, 1–16) speeds up fragmented (HLS/DASH) downloads.
@@ -50,9 +51,9 @@
 
 | File | Description |
 |---|---|
-| **YT-DLP Minimalist Setup 1.2.0.exe** | Installer — recommended for most users |
-| **YT-DLP Minimalist 1.2.0 Portable.exe** | Portable version — no installation required |
-| **[YT-DLP_Minimalist_Extension.zip](https://pixeldrain.com/u/A5skyrPp)** | Companion browser extension (Chrome/Edge/Chromium) — see [Browser Extension](#browser-extension) |
+| **YT-DLP Minimalist Setup 1.3.0.exe** | Installer — recommended for most users |
+| **YT-DLP Minimalist 1.3.0 Portable.exe** | Portable version — no installation required |
+| **[YT-DLP_Minimalist_Extension.zip](https://pixeldrain.com/u/QhRyzQ5Y)** | Companion browser extension (Chrome/Edge/Chromium) — see [Browser Extension](#browser-extension) |
 
 ### Requirements
 
@@ -62,9 +63,9 @@ Windows 10/11 (64-bit)
 
 Both files were scanned on VirusTotal and came back clean:
 
-- Installer: 0/65 detections — [View results](https://www.virustotal.com/gui/file/634041b000c68517eeeb057cbda0fc49822581a2ea08442b14b7e988fbc4257a?nocache=1)
-- Portable: 0/63 detections — [View results](https://www.virustotal.com/gui/file/cf3b26a8bc6620b1ab5043e975f5db9955a188dc4a2db5a16bc13c9f3e02a346?nocache=1)
-- Extencion: 0/64 detections — [View results](https://www.virustotal.com/gui/file/5b6423342c7fd94f5dccdd311b4c212538e30d6de6d9ec8f8ff041eb27385151?nocache=1)
+- Installer: 0/63 detections — [View results](https://www.virustotal.com/gui/file/eccdb220f860e3e4a23691973404bb3636e87dc8d3f1d94051693873b8c52581?nocache=1)
+- Portable: 0/63 detections — [View results](https://www.virustotal.com/gui/file/7eb8dc28599d14d1d41aa19ff02a82b6f267601ec263eb43114c0cd4075e8532?nocache=1)
+- Extencion: 0/65 detections — [View results](https://www.virustotal.com/gui/file/d653cd291a730bf8f8c7f59464d01997f6ea31882b9ad5e97ad5dbf3d6dc759f?nocache=1)
 
 ## Screenshots
 
@@ -127,7 +128,7 @@ A companion browser extension (Chrome, Edge, and other Chromium-based browsers) 
 so you can queue a download without copying and pasting the link — the app must be running to
 receive it, and everything stays local (`127.0.0.1`, nothing leaves your computer).
 
-**[⬇️ Download the extension (.zip)](https://pixeldrain.com/u/A5skyrPp)**
+**[⬇️ Download the extension (.zip)](https://pixeldrain.com/u/QhRyzQ5Y)**
 
 See [`extension/README.md`](./extension/README.md) for installation steps.
 

@@ -119,7 +119,8 @@ function readJsonBody(req, res, onData) {
 // /progress más abajo).
 //
 // handlers = { getStatus(id), openFile(id), openFolder(id), pause(id), resume(id), cancel(id),
-//              openFileByPath(path), openFolderByPath(path, folder), getSettings(), updateSettings(patch) }
+//              openFileByPath(path), openFolderByPath(path, folder), getSettings(), updateSettings(patch),
+//              getDownloadedUrls() }
 //            — provistos por main.js.
 // getStatus(id) debe devolver algo como:
 //   { status: 'starting'|'downloading'|'completed'|'error'|'cancelled'|'paused',
@@ -129,8 +130,11 @@ function readJsonBody(req, res, onData) {
 // descarga con ese id. openFileByPath/openFolderByPath devuelven
 // { ok: true|false } y se usan desde el historial (por ruta, no por id: ver
 // comentario junto al endpoint /open-file-by-path más abajo).
+// getDownloadedUrls() devuelve un array de { url, videoId, extractorKey }
+// con las descargas ya completadas según el historial real de la app (ver
+// GET /downloaded más abajo).
 function startExtensionServer(onUrl, handlers) {
-  const { getStatus, openFile, openFolder, pause, resume, cancel, openFileByPath, openFolderByPath, getSettings, updateSettings } = handlers || {};
+  const { getStatus, openFile, openFolder, pause, resume, cancel, openFileByPath, openFolderByPath, getSettings, updateSettings, getDownloadedUrls } = handlers || {};
 
   const server = http.createServer((req, res) => {
     const [pathname, query] = req.url.split('?');
@@ -154,6 +158,19 @@ function startExtensionServer(onUrl, handlers) {
         onUrl(data.url, typeof data.title === 'string' ? data.title : '', sanitizeQuality(data.quality), id);
         sendJson(res, 200, { ok: true, id });
       });
+      return;
+    }
+
+    // El botón flotante de la extensión (content-overlay.js) usa esto para
+    // saber qué videos ya se descargaron, tomando el historial REAL de la
+    // app (history.json, ver getDownloadedIdentifiersForExtension en
+    // main.js) en vez de depender de que el popup de la extensión haya
+    // estado abierto sondeando /progress. Se devuelve solo url/videoId/
+    // extractorKey de las descargas exitosas, nunca rutas de archivo ni
+    // miniaturas.
+    if (req.method === 'GET' && pathname === '/downloaded') {
+      const list = typeof getDownloadedUrls === 'function' ? getDownloadedUrls() || [] : [];
+      sendJson(res, 200, { ok: true, downloaded: list });
       return;
     }
 

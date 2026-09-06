@@ -16,6 +16,13 @@ contextBridge.exposeInMainWorld('yoinksAPI', {
   download: (payload) => ipcRenderer.invoke('app:download', payload),
   pauseDownload: (downloadId) => ipcRenderer.send('app:pause', downloadId),
   cancelDownload: (downloadId) => ipcRenderer.send('app:cancel', downloadId),
+  // Para descargas que vinieron de la extensión pero todavía no tienen un
+  // proceso de yt-dlp corriendo (en cola) o ya no lo tienen (recién
+  // pausadas): pauseActiveDownload/cancelActiveDownload en renderer.js usan
+  // esto para reflejar el cambio en extensionDownloads a mano, ya que en
+  // esos casos no hay ningún cierre de proceso que lo dispare solo (ver
+  // reportExt() en performDownload, en main.js).
+  markExtensionDownloadStatus: (extId, status) => ipcRenderer.send('app:mark-extension-download-status', extId, status),
   onProgress: (callback) =>
     ipcRenderer.on('app:progress', (_event, data) => callback(data)),
 

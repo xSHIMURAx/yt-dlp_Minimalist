@@ -87,6 +87,8 @@ const I18N_STRINGS = {
     paused_meta: 'Podés reanudarla o cancelarla.',
     no_connection: 'Sin conexión con la app…',
     check_app_open: 'Verificá que YT-DLP Minimalist esté abierta.',
+    progress_lost_label: 'Seguimiento perdido',
+    progress_lost_meta: 'La app ya no tiene datos de esta descarga (pasó mucho tiempo o se reinició). Puede que haya terminado igual.',
     starting_ellipsis: 'Iniciando…',
     downloading_percent: 'Descargando {percent}%',
     eta_label: 'ETA {eta}',
@@ -113,6 +115,8 @@ const I18N_STRINGS = {
     overlay_opening_app_label: 'Abriendo app…',
     overlay_open_app_retry_title: '¿Abriste la app? — Reintentar',
     overlay_open_app_retry_label: '¿Abriste la app?',
+    overlay_already_downloaded_title: 'Ya descargaste este video antes (según el historial) — clic derecho: elegir calidad',
+    overlay_already_downloaded_label: 'Ya descargado',
   },
   en: {
     options_subtitle: 'Choose how the floating button that appears over videos looks.',
@@ -190,6 +194,8 @@ const I18N_STRINGS = {
     paused_meta: 'You can resume or cancel it.',
     no_connection: 'No connection to the app…',
     check_app_open: 'Check that YT-DLP Minimalist is open.',
+    progress_lost_label: 'Tracking lost',
+    progress_lost_meta: "The app no longer has data for this download (too much time passed, or it restarted). It may have finished anyway.",
     starting_ellipsis: 'Starting…',
     downloading_percent: 'Downloading {percent}%',
     eta_label: 'ETA {eta}',
@@ -215,6 +221,8 @@ const I18N_STRINGS = {
     overlay_opening_app_label: 'Opening app…',
     overlay_open_app_retry_title: 'Did you open the app? — Retry',
     overlay_open_app_retry_label: 'Open the app?',
+    overlay_already_downloaded_title: 'You already downloaded this video before (per history) — right-click: choose quality',
+    overlay_already_downloaded_label: 'Already downloaded',
   },
 };
 

@@ -40,10 +40,46 @@
     );
   }
 
+  // Busca un diálogo/modal REAL (marcado como tal para accesibilidad, con
+  // role="dialog" o aria-modal="true" — así es como casi todos los sitios
+  // bien hechos marcan tanto un visor ampliado de pantalla completa como
+  // un panel más chico, ej. el menú "Compartir" de X) que se solape con el
+  // área del video y no lo contenga (si lo contiene, el video está DENTRO
+  // del propio diálogo, no tapado por él).
+  //
+  // Antes probamos detectar oclusión con document.elementFromPoint, pero
+  // eso también detectaba capas invisibles que algunos menús desplegables
+  // (ej. el menú nativo "..." de un tweet: Enviar vía chat/Copiar
+  // vínculo/etc.) ponen sobre TODA la página solo para poder cerrarse al
+  // hacer click afuera — sin ser un modal real, tapaban los botones igual.
+  // Guiarnos por el rol de accesibilidad evita ese falso positivo, porque
+  // esos menús desplegables usan role="menu", no role="dialog".
+  function findCoveringDialog(video, rect) {
+    const dialogs = document.querySelectorAll('[role="dialog"], [aria-modal="true"]');
+    for (const dlg of dialogs) {
+      if (!dlg.isConnected || dlg.contains(video)) continue;
+      const dr = dlg.getBoundingClientRect();
+      if (dr.width === 0 || dr.height === 0) continue; // desmontado/oculto
+      const overlap = !(dr.right < rect.left || dr.left > rect.right || dr.bottom < rect.top || dr.top > rect.bottom);
+      if (overlap) return dlg;
+    }
+    return null;
+  }
+
+  // Un video cuenta como "tapado" si hay un diálogo/modal real (ver
+  // arriba) solapado con su área — ej. el fondo oscuro de un visor
+  // ampliado de pantalla completa (al expandir un video en X) o un panel
+  // más chico como el menú "Compartir".
+  function isOccludedByModal(video, rect) {
+    return !!findCoveringDialog(video, rect);
+  }
+
+
   // Todos los <video> que ahora mismo valen la pena mostrar con su propio
-  // botón: visibles en el viewport y de un tamaño mínimo razonable. Orden
-  // de más grande a más chico (así, si hay que recortar por MAX_OVERLAYS,
-  // se priorizan los videos principales por sobre thumbnails secundarios).
+  // botón: visibles en el viewport, de un tamaño mínimo razonable, y no
+  // tapados por un modal/visor ampliado. Orden de más grande a más chico
+  // (así, si hay que recortar por MAX_OVERLAYS, se priorizan los videos
+  // principales por sobre thumbnails secundarios).
   function getEligibleVideos() {
     const videos = Array.from(document.querySelectorAll('video'));
     const eligible = [];
@@ -51,6 +87,7 @@
       const rect = v.getBoundingClientRect();
       if (rect.width < MIN_VIDEO_WIDTH || rect.height < MIN_VIDEO_HEIGHT) continue;
       if (!isInViewport(rect)) continue;
+      if (isOccludedByModal(v, rect)) continue;
       eligible.push({ video: v, rect, area: rect.width * rect.height });
     }
     eligible.sort((a, b) => b.area - a.area);
@@ -272,14 +309,44 @@
     wrap.appendChild(closeBtn);
     document.documentElement.appendChild(wrap);
 
+    // Ya lo descargaste antes (según el historial): se recalcula acá (no
+    // solo al crear el botón) porque en sitios tipo SPA (YouTube) el mismo
+    // <video> puede cambiar de contenido sin que este overlay se
+    // reconstruya — ver `reposition` más abajo, que la vuelve a llamar
+    // periódicamente, y refreshAllDownloadedVisuals(), que la dispara apenas
+    // cambia el historial (ej. termina una descarga en curso).
+    function updateDownloadedVisual() {
+      const downloaded = isUrlAlreadyDownloaded(getEffectiveDownloadUrl(videoEl));
+      wrap.classList.toggle('is-downloaded', downloaded);
+      btn.classList.toggle('is-downloaded', downloaded);
+      // No pisamos el estado si el botón está en medio de un envío
+      // (enviando/éxito/error): ese feedback tiene prioridad momentánea.
+      if (btn.disabled) return;
+      const label = btn.querySelector('span');
+      btn.title = downloaded
+        ? t('overlay_already_downloaded_title', currentLang)
+        : t('overlay_btn_title', currentLang);
+      if (label) {
+        label.textContent = downloaded
+          ? t('overlay_already_downloaded_label', currentLang)
+          : t('overlay_download_label', currentLang);
+      }
+    }
+    updateDownloadedVisual();
+
     const userPositioned = { value: false }; // objeto para poder pasarlo por referencia
     positionOverlay(wrap, videoEl, userPositioned);
     makeDraggable(wrap, userPositioned);
 
     // El reproductor puede cambiar de tamaño/posición (scroll, resize,
     // scroll infinito reacomodando tarjetas), así que reubicamos el botón
-    // de forma periódica en vez de depender de un único evento.
-    const reposition = () => positionOverlay(wrap, videoEl, userPositioned);
+    // de forma periódica en vez de depender de un único evento. Aprovechamos
+    // el mismo ciclo para refrescar el estado "ya descargado" del punto de
+    // arriba.
+    const reposition = () => {
+      positionOverlay(wrap, videoEl, userPositioned);
+      updateDownloadedVisual();
+    };
     window.addEventListener('scroll', reposition, { passive: true });
     window.addEventListener('resize', reposition);
     const intervalId = setInterval(reposition, 500);
@@ -345,9 +412,8 @@
             if (label) label.textContent = t('overlay_open_app_retry_label', currentLang);
             setTimeout(() => {
               btn.classList.remove('is-error');
-              btn.title = t('overlay_btn_title', currentLang);
-              if (label) label.textContent = t('overlay_download_label', currentLang);
               btn.disabled = false;
+              updateDownloadedVisual(); // restaura "Descargar" o "Ya descargado" según corresponda
             }, 1800);
           }
         }
@@ -411,7 +477,7 @@
       if (!qualityMenu.contains(e.target)) closeQualityMenu();
     });
 
-    const entry = { wrap, qualityMenu, cleanupOverlay };
+    const entry = { wrap, qualityMenu, cleanupOverlay, updateDownloadedVisual };
     return entry;
   }
 
@@ -450,6 +516,124 @@
   function isSiteDisabled() {
     const host = normalizeHostname(location.hostname);
     return disabledSites.includes(host) || extensionDisabledSites.includes(host);
+  }
+
+  // ---- "Ya lo descargaste antes" ----
+  // Fuente principal: el historial REAL de la app (history.json), que
+  // background.js cachea acá bajo APP_DOWNLOADED_KEY vía GET /downloaded
+  // (ver refreshAppDownloadedUrls en background.js) — se llena apenas
+  // termina cada descarga, sin importar si el popup de la extensión estuvo
+  // abierto en algún momento.
+  // Fuente secundaria (respaldo): sendHistory, el historial propio de la
+  // EXTENSIÓN (pestaña "Historial" del popup), por si todavía no llegó
+  // ningún refresco de la app (ej. justo se instaló la extensión) — ese
+  // solo se marca 'completed' cuando el popup sondeó /progress hasta el
+  // final, así que puede quedar desactualizado si el popup nunca se abrió,
+  // pero sigue siendo mejor que nada mientras se pone al día el de arriba.
+  const APP_DOWNLOADED_KEY = 'appDownloadedUrls';
+  const HISTORY_KEY = 'sendHistory';
+  let downloadedUrlKeys = new Set();
+  let downloadedVideoIds = new Set();
+
+  // Misma idea que cleanDownloadUrl (url-utils.js) pero un paso más allá,
+  // pensada solo para COMPARAR si es "el mismo video", no para mandar a la
+  // app: además de descartar &list=/&index=, ignora "t" (marca de tiempo
+  // donde quedó el video) y barras finales, para que "ya lo descargué"
+  // siga valiendo aunque se reabra el mismo video en otro momento del
+  // reproductor o con distinto host www./m.
+  function normalizeForHistoryMatch(rawUrl) {
+    try {
+      const cleaned = cleanDownloadUrl(rawUrl);
+      const u = new URL(cleaned);
+      const host = u.hostname.replace(/^www\./, '').replace(/^m\./, '');
+      u.searchParams.delete('t');
+      u.hash = '';
+      const path = u.pathname.replace(/\/+$/, '');
+      const params = u.searchParams.toString();
+      return host + path + (params ? '?' + params : '');
+    } catch (e) {
+      return rawUrl;
+    }
+  }
+
+  // Solo para YouTube: el "videoId" que guarda el historial de la app viene
+  // de los metadatos reales que sacó yt-dlp, así que comparar por ahí es
+  // más robusto que por URL — reconoce el mismo video sin importar si se
+  // llegó por youtu.be, /watch?v=, /shorts/ o con distintos parámetros.
+  function extractYoutubeVideoId(rawUrl) {
+    try {
+      const u = new URL(rawUrl);
+      const host = u.hostname.replace(/^www\./, '').replace(/^m\./, '').replace(/^music\./, '');
+      if (host === 'youtube.com') {
+        if (u.pathname === '/watch') return u.searchParams.get('v');
+        if (u.pathname.startsWith('/shorts/')) return u.pathname.split('/')[2] || null;
+        return null;
+      }
+      if (host === 'youtu.be') return u.pathname.replace(/^\//, '') || null;
+      return null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // entries: array de { url, videoId, extractorKey } (ver GET /downloaded)
+  // o de entradas de sendHistory ({ url, status }). isCompletedList indica
+  // si hace falta filtrar por status === 'completed' (sendHistory trae de
+  // todo: sent/protocol/error/completed) o si ya vienen todas confirmadas
+  // (las de la app, que solo manda las exitosas).
+  function mergeDownloadedEntries(entries, requireCompletedStatus) {
+    for (const entry of Array.isArray(entries) ? entries : []) {
+      if (!entry || !entry.url) continue;
+      if (requireCompletedStatus && entry.status !== 'completed') continue;
+      downloadedUrlKeys.add(normalizeForHistoryMatch(entry.url));
+      if (entry.videoId) downloadedVideoIds.add(entry.videoId);
+    }
+  }
+
+  function rebuildDownloadedSet(appList, sendHistoryList) {
+    downloadedUrlKeys = new Set();
+    downloadedVideoIds = new Set();
+    mergeDownloadedEntries(appList, false);
+    mergeDownloadedEntries(sendHistoryList, true);
+  }
+
+  function isUrlAlreadyDownloaded(rawUrl) {
+    if (!rawUrl) return false;
+    const videoId = extractYoutubeVideoId(rawUrl);
+    if (videoId && downloadedVideoIds.has(videoId)) return true;
+    return downloadedUrlKeys.has(normalizeForHistoryMatch(rawUrl));
+  }
+
+  function loadDownloadHistory(callback) {
+    // Le pedimos a background.js que refresque su caché del historial de
+    // la app ANTES de leerla (en vez de solo leer lo que ya tenía guardado
+    // de la última alarma, que puede ser de hasta 1 minuto atrás) — así el
+    // primer render de esta página ya sale con el dato más fresco posible.
+    // Si background.js no llega a responder a tiempo (o el mensaje falla
+    // por lo que sea), igual seguimos y leemos lo que haya en storage.
+    const proceed = () => {
+      chrome.storage.local.get({ [APP_DOWNLOADED_KEY]: [], [HISTORY_KEY]: [] }, (data) => {
+        rebuildDownloadedSet(data[APP_DOWNLOADED_KEY], data[HISTORY_KEY]);
+        if (callback) callback();
+      });
+    };
+    try {
+      chrome.runtime.sendMessage({ type: 'refresh-downloaded-urls' }, () => {
+        void chrome.runtime.lastError; // evita el warning si no hubo listener a tiempo
+        proceed();
+      });
+    } catch (e) {
+      proceed();
+    }
+  }
+
+  // Recorre los botones ya en pantalla para que se actualicen apenas
+  // cambia el historial (ej. termina una descarga en curso), sin esperar
+  // a que syncOverlay() los reconstruya.
+  function refreshAllDownloadedVisuals() {
+    for (const entry of overlaysByVideo.values()) {
+      if (entry.updateDownloadedVisual) entry.updateDownloadedVisual();
+    }
   }
 
   // Un overlay por <video> visible: la clave es el propio elemento
@@ -504,31 +688,37 @@
   }
 
   function init() {
-    chrome.storage.sync.get(
-      { overlayMode: 'icon', overlayEnabled: true, [DISABLED_SITES_KEY]: [], [EXTENSION_DISABLED_SITES_KEY]: [], [I18N_LANG_KEY]: I18N_DEFAULT_LANG },
-      (data) => {
-      currentMode = data.overlayMode === 'text' ? 'text' : 'icon';
-      overlayEnabled = data.overlayEnabled !== false;
-      disabledSites = Array.isArray(data[DISABLED_SITES_KEY]) ? data[DISABLED_SITES_KEY] : [];
-      extensionDisabledSites = Array.isArray(data[EXTENSION_DISABLED_SITES_KEY]) ? data[EXTENSION_DISABLED_SITES_KEY] : [];
-      currentLang = i18nNormalizeLang(data[I18N_LANG_KEY]);
-      syncOverlay();
+    // Cargamos primero el historial (para saber qué videos ya se
+    // descargaron) y recién con eso resuelto pedimos los ajustes y armamos
+    // los botones, así el primer render ya sale con el color/etiqueta
+    // correctos en vez de "saltar" un instante después.
+    loadDownloadHistory(() => {
+      chrome.storage.sync.get(
+        { overlayMode: 'icon', overlayEnabled: true, [DISABLED_SITES_KEY]: [], [EXTENSION_DISABLED_SITES_KEY]: [], [I18N_LANG_KEY]: I18N_DEFAULT_LANG },
+        (data) => {
+        currentMode = data.overlayMode === 'text' ? 'text' : 'icon';
+        overlayEnabled = data.overlayEnabled !== false;
+        disabledSites = Array.isArray(data[DISABLED_SITES_KEY]) ? data[DISABLED_SITES_KEY] : [];
+        extensionDisabledSites = Array.isArray(data[EXTENSION_DISABLED_SITES_KEY]) ? data[EXTENSION_DISABLED_SITES_KEY] : [];
+        currentLang = i18nNormalizeLang(data[I18N_LANG_KEY]);
+        syncOverlay();
 
-      // Muchos sitios (YouTube, X/Twitter, Instagram, etc.) son SPA y montan
-      // el <video> unos instantes después de cargar la página, reemplazan
-      // el nodo al navegar entre videos, o cargan más tarjetas al hacer
-      // scroll infinito. Por eso vigilamos el DOM en vez de chequear una
-      // sola vez.
-      const observer = new MutationObserver(() => syncOverlay());
-      observer.observe(document.documentElement, {
-        childList: true,
-        subtree: true,
+        // Muchos sitios (YouTube, X/Twitter, Instagram, etc.) son SPA y montan
+        // el <video> unos instantes después de cargar la página, reemplazan
+        // el nodo al navegar entre videos, o cargan más tarjetas al hacer
+        // scroll infinito. Por eso vigilamos el DOM en vez de chequear una
+        // sola vez.
+        const observer = new MutationObserver(() => syncOverlay());
+        observer.observe(document.documentElement, {
+          childList: true,
+          subtree: true,
+        });
+
+        // Respaldo por si algún cambio no dispara el MutationObserver (p. ej.
+        // un <video> que solo cambia de tamaño/posición al hacer scroll, o
+        // entra/sale del viewport sin que cambie el DOM).
+        setInterval(syncOverlay, 1000);
       });
-
-      // Respaldo por si algún cambio no dispara el MutationObserver (p. ej.
-      // un <video> que solo cambia de tamaño/posición al hacer scroll, o
-      // entra/sale del viewport sin que cambie el DOM).
-      setInterval(syncOverlay, 1000);
     });
   }
 
@@ -582,5 +772,22 @@
     if (!relevant) return;
     removeAllOverlays();
     syncOverlay();
+  });
+
+  // El historial vive en chrome.storage.LOCAL (no sync): tanto
+  // APP_DOWNLOADED_KEY (lo cachea background.js desde la app, ver
+  // refreshAppDownloadedUrls) como HISTORY_KEY (sendHistory, respaldo — ver
+  // arriba). Cualquiera de los dos que cambie, sin que esta pestaña haga
+  // nada — por ejemplo cuando termina una descarga que se mandó desde el
+  // popup, desde OTRA pestaña con el mismo video, o directo desde la app —
+  // dispara un refresco de color/etiqueta de los botones ya en pantalla
+  // (sin reconstruirlos), sin esperar el refresco periódico de `reposition`.
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'local') return;
+    if (!changes[APP_DOWNLOADED_KEY] && !changes[HISTORY_KEY]) return;
+    chrome.storage.local.get({ [APP_DOWNLOADED_KEY]: [], [HISTORY_KEY]: [] }, (data) => {
+      rebuildDownloadedSet(data[APP_DOWNLOADED_KEY], data[HISTORY_KEY]);
+      refreshAllDownloadedVisuals();
+    });
   });
 })();
