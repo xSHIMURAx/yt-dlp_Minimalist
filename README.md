@@ -9,8 +9,6 @@
   <img alt="Version" src="https://img.shields.io/badge/version-1.3.0-brightgreen">
   <img alt="License" src="https://img.shields.io/badge/license-MIT-blue">
   <img alt="Built with Electron" src="https://img.shields.io/badge/built%20with-Electron-47848F?logo=electron&logoColor=white">
-  <a href="https://www.virustotal.com/gui/file/eccdb220f860e3e4a23691973404bb3636e87dc8d3f1d94051693873b8c52581?nocache=1">
-    <img alt="VirusTotal" src="https://img.shields.io/badge/VirusTotal-0%2F67%20detections-success?logo=virustotal&logoColor=white">
   </a>
 </p>
 
