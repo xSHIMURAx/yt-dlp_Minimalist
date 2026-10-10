@@ -55,8 +55,8 @@
 
 | File | Description |
 |---|---|
-| **YT-DLP Minimalist Setup 1.4.0.exe** | Installer — recommended for most users |
-| **YT-DLP Minimalist 1.4.0 Portable.exe** | Portable version — no installation required |
+| **[YT-DLP Minimalist Setup 1.4.0.exe](https://github.com/xSHIMURAx/yt-dlp_Minimalist/releases/download/v1.4.0/YT-DLP.Minimalist.Setup.1.4.0.exe)** | Installer — recommended for most users |
+| **[YT-DLP Minimalist 1.4.0 Portable.exe](https://github.com/xSHIMURAx/yt-dlp_Minimalist/releases/download/v1.4.0/YT-DLP.Minimalist.1.4.0.Portable.exe)** | Portable version — no installation required |
 | **[YT-DLP_Minimalist_Extension.zip](https://pixeldrain.com/u/FYhQXaWM)** | Companion browser extension (Chrome/Edge/Chromium) — see [Browser Extension](#browser-extension) |
 
 ### Requirements
