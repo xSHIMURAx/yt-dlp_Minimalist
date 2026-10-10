@@ -52,17 +52,38 @@ function cleanDownloadUrl(rawUrl) {
 // "audio") al objeto que espera la app en /add-url. Si el video no tiene
 // exactamente esa altura disponible, la app cae sola a la más cercana (ver
 // README de la app, sección "Calidad enviada desde la extensión").
+// Gramática del valor de calidad (el mismo que usa el <select> del popup):
+//   best[:mp4|mkv|webm]                  -> mejor video+audio
+//   video:<alto>[:mp4|mkv|webm]          -> altura puntual (ej. video:1080:webm)
+//   audio[:<fmt>[:<kbps>]]           -> solo audio (fmt = mp3|m4a|opus)
+//   thumb                            -> solo la miniatura del video (imagen)
+// Los valores viejos ("best", "video:720", "audio", "audio:m4a") siguen valiendo.
+const QUALITY_CONTAINERS = ['mp4', 'mkv', 'webm'];
+const QUALITY_AUDIO_FORMATS = ['mp3', 'm4a', 'opus'];
 function parseQualityValue(value) {
-  if (!value || value === 'best') return { type: 'best' };
-  if (value === 'audio') return { type: 'audio' };
-  if (value.startsWith('audio:')) {
-    const format = value.slice('audio:'.length);
-    if (format === 'm4a' || format === 'opus') return { type: 'audio', format };
-    return { type: 'audio' };
+  if (!value) return { type: 'best' };
+  const [kind, a, b] = String(value).split(':');
+  if (kind === 'best') {
+    const out = { type: 'best' };
+    if (QUALITY_CONTAINERS.includes(a)) out.container = a;
+    return out;
   }
-  if (value.startsWith('video:')) {
-    const height = parseInt(value.slice('video:'.length), 10);
-    if (Number.isFinite(height) && height > 0) return { type: 'video', height };
+  if (kind === 'thumb') return { type: 'thumb' };
+  if (kind === 'audio') {
+    if (!a) return { type: 'audio' };
+    const format = QUALITY_AUDIO_FORMATS.includes(a) ? a : 'mp3';
+    const out = { type: 'audio', format };
+    const kbps = parseInt(b, 10);
+    if (Number.isFinite(kbps) && kbps > 0) out.bitrateKbps = kbps;
+    return out;
+  }
+  if (kind === 'video') {
+    const height = parseInt(a, 10);
+    if (Number.isFinite(height) && height > 0) {
+      const out = { type: 'video', height };
+      if (QUALITY_CONTAINERS.includes(b)) out.container = b;
+      return out;
+    }
   }
   return { type: 'best' };
 }
@@ -105,4 +126,25 @@ function buildProtocolUrl(url, quality, extId) {
 // del popup. Ver el manejo de "ytdlpminimalist://open" en src/main.js.
 function buildOpenProtocolUrl() {
   return `${PROTOCOL_SCHEME}://open`;
+}
+
+// Miniatura de un video de YouTube a partir de su URL (null si no es YouTube
+// o no se puede sacar el id). Usada por el historial del popup.
+function youtubeThumbnailUrl(rawUrl) {
+  try {
+    const u = new URL(rawUrl);
+    const h = u.hostname.replace(/^www\.|^m\./, '');
+    let id = null;
+    if (h === 'youtu.be') id = u.pathname.slice(1).split('/')[0];
+    else if (h.endsWith('youtube.com') || h.endsWith('youtube-nocookie.com')) {
+      id = u.searchParams.get('v');
+      if (!id) {
+        const m = u.pathname.match(/^\/(?:shorts|embed|live)\/([\w-]{6,})/);
+        if (m) id = m[1];
+      }
+    }
+    return id ? `https://i.ytimg.com/vi/${encodeURIComponent(id)}/mqdefault.jpg` : null;
+  } catch (e) {
+    return null;
+  }
 }

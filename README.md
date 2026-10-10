@@ -6,7 +6,7 @@
 
 <p align="center">
   <img alt="Platform" src="https://img.shields.io/badge/platform-Windows%2010%2F11-0078D6?logo=windows&logoColor=white">
-  <img alt="Version" src="https://img.shields.io/badge/version-1.3.0-brightgreen">
+  <img alt="Version" src="https://img.shields.io/badge/version-1.4.0-brightgreen">
   <img alt="License" src="https://img.shields.io/badge/license-MIT-blue">
   <img alt="Built with Electron" src="https://img.shields.io/badge/built%20with-Electron-47848F?logo=electron&logoColor=white">
   </a>
@@ -30,6 +30,12 @@
 
 ## Features
 
+- 🆕 **New in 1.4.0**
+  - 🖼️ **Thumbnail-only download** — save just the video's cover image, from the app or the extension.
+  - 📃 **Playlist tab + range selection** — a dedicated sidebar tab for playlists; pick a range (e.g. 45 to 83) instead of ticking videos one by one, with the same two-column layout and floating quality menu as single videos.
+  - 🔑 **PO Token provider** (bgutil) — managed from **Settings → Updates**, so age-restricted YouTube videos get all their formats; it installs itself the first time it's needed.
+  - 💬 **Plain-language errors** — technical messages (HTTP 403, network, disk space…) are now explained in simple words with a suggested fix.
+  - 🧹 Removed the WAV and MOV options; extension progress cards no longer pile up when the app is closed (new **Clear** button).
 - 🎬 **Video, audio, or full playlists** — pick the format and quality you want, per download or by preset.
 - 🖥️ **Terminal-style UI** — a clean, minimalist interface with a live terminal mode for the curious.
 - 🗂️ **Sidebar navigation** — a collapsible sidebar (new in 1.2.0) gives quick access to a new task, Terminal, Tasks (downloads/history), and Settings, each as its own full page instead of a floating popup.
@@ -49,9 +55,9 @@
 
 | File | Description |
 |---|---|
-| **YT-DLP Minimalist Setup 1.3.0.exe** | Installer — recommended for most users |
-| **YT-DLP Minimalist 1.3.0 Portable.exe** | Portable version — no installation required |
-| **[YT-DLP_Minimalist_Extension.zip](https://pixeldrain.com/u/QhRyzQ5Y)** | Companion browser extension (Chrome/Edge/Chromium) — see [Browser Extension](#browser-extension) |
+| **YT-DLP Minimalist Setup 1.4.0.exe** | Installer — recommended for most users |
+| **YT-DLP Minimalist 1.4.0 Portable.exe** | Portable version — no installation required |
+| **[YT-DLP_Minimalist_Extension.zip](https://pixeldrain.com/u/FYhQXaWM)** | Companion browser extension (Chrome/Edge/Chromium) — see [Browser Extension](#browser-extension) |
 
 ### Requirements
 
@@ -61,9 +67,9 @@ Windows 10/11 (64-bit)
 
 Both files were scanned on VirusTotal and came back clean:
 
-- Installer: 0/63 detections — [View results](https://www.virustotal.com/gui/file/eccdb220f860e3e4a23691973404bb3636e87dc8d3f1d94051693873b8c52581?nocache=1)
-- Portable: 0/63 detections — [View results](https://www.virustotal.com/gui/file/7eb8dc28599d14d1d41aa19ff02a82b6f267601ec263eb43114c0cd4075e8532?nocache=1)
-- Extencion: 0/65 detections — [View results](https://www.virustotal.com/gui/file/d653cd291a730bf8f8c7f59464d01997f6ea31882b9ad5e97ad5dbf3d6dc759f?nocache=1)
+- Installer: [View results](https://www.virustotal.com/gui/file/6dd06d8369d3a70eaa025efdb710f9667a5fb597a201fe61a143e8b9f6c2311d?nocache=1)
+- Portable: [View results](https://www.virustotal.com/gui/file/b1572c71f15cc8fd41a3b41d05a36f63820b06424861fe8f8c7e35c233aa48aa?nocache=1)
+- Extension: [View results](https://www.virustotal.com/gui/file/dd9326dd93809410a8e919f635d5791e67bf1c993611ac24810e0d2e1d851ef7?nocache=1)
 
 ## Screenshots
 
@@ -105,7 +111,7 @@ Both files were scanned on VirusTotal and came back clean:
 
 **Updates Panel**
 
-![Updates Panel](screenshots/09.png)
+![Updates Panel](screenshots/09.gif)
 
 **About**
 
@@ -126,7 +132,7 @@ A companion browser extension (Chrome, Edge, and other Chromium-based browsers) 
 so you can queue a download without copying and pasting the link — the app must be running to
 receive it, and everything stays local (`127.0.0.1`, nothing leaves your computer).
 
-**[⬇️ Download the extension (.zip)](https://pixeldrain.com/u/QhRyzQ5Y)**
+**[⬇️ Download the extension (.zip)](https://pixeldrain.com/u/FYhQXaWM)**
 
 See [`extension/README.md`](./extension/README.md) for installation steps.
 
@@ -188,14 +194,21 @@ yt-dlp-interface/
 │   ├── preload.js
 │   ├── index.html
 │   ├── styles.css
-│   └── renderer.js
+│   ├── renderer.js
+│   ├── i18n.js
+│   └── extension-server.js
 ├── extension/
 │   ├── manifest.json
 │   ├── background.js
 │   ├── popup.html / popup.js
+│   ├── sidepanel.html / sidepanel.js
 │   ├── content-overlay.js / content-overlay.css
 │   ├── options.html / options.js
+│   ├── i18n.js / skin.js
 │   └── url-utils.js
+├── scripts/
+│   └── prepare-pot-server.js
+├── screenshots/
 └── assets/
 ```
 
@@ -233,9 +246,6 @@ Issues and pull requests are welcome! If you run into a bug or have an idea for 
 please [open an issue](../../issues).
 
 ## License and Credits
-
-Based on the design of [yoinks](https://github.com/pablostanley/yoinks) by Pablo Stanley,
-published under the MIT license.
 
 **Fair Use Note:** Downloading content may violate the terms of service of some platforms —
 download only what you have the right to save.

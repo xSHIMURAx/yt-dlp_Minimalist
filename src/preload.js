@@ -10,6 +10,9 @@ contextBridge.exposeInMainWorld('yoinksAPI', {
   getAppVersion: () => ipcRenderer.invoke('app:get-version'),
 
   readClipboard: () => ipcRenderer.invoke('clipboard:read'),
+  // Copiar texto seleccionado (salida de la terminal) y menú contextual Copiar / Seleccionar todo.
+  copyText: (text) => clipboard.writeText(String(text || '')),
+  showTerminalContextMenu: (hasSelection) => ipcRenderer.send('terminal:context-menu', !!hasSelection),
 
   fetchFormats: (url) => ipcRenderer.invoke('app:fetch-formats', url),
   fetchPlaylist: (url) => ipcRenderer.invoke('app:fetch-playlist', url),
@@ -25,6 +28,17 @@ contextBridge.exposeInMainWorld('yoinksAPI', {
   markExtensionDownloadStatus: (extId, status) => ipcRenderer.send('app:mark-extension-download-status', extId, status),
   onProgress: (callback) =>
     ipcRenderer.on('app:progress', (_event, data) => callback(data)),
+  // La extensión pidió reanudar una descarga pausada (extId): main.js delega
+  // en la ventana para que su fila/botones/resultado queden sincronizados (ver
+  // resumeDownloadById en main.js). ackExtensionResume avisa si la encontró.
+  onResumeExtensionDownload: (callback) =>
+    ipcRenderer.on('app:resume-extension-download', (_event, extId) => callback(extId)),
+  ackExtensionResume: (extId, handled) => ipcRenderer.send('app:resume-extension-download-ack', extId, handled),
+  // La extensión canceló una descarga que estaba pausada (ya no hay proceso de
+  // yt-dlp): la ventana tiene que sacar esa fila de su panel (ver
+  // cancelDownloadById en main.js).
+  onCancelExtensionDownload: (callback) =>
+    ipcRenderer.on('app:cancel-extension-download', (_event, extId) => callback(extId)),
 
   // URL recibida desde la extensión del navegador. main.js puede reenviar
   // el mismo link varias veces (ver 'pendingUrlRetryTimer' ahí) hasta que
@@ -53,8 +67,11 @@ contextBridge.exposeInMainWorld('yoinksAPI', {
   getPendingExtensionUrl: () => ipcRenderer.invoke('extension:get-pending-url'),
 
   // Diálogo "¿Qué querés hacer?" al presionar ✕ (closeBehavior = 'ask').
+  // El payload trae { mode }: 'ask' (cierre con ✕ y closeBehavior = preguntar), 'close'
+  // (✕ con closeBehavior = cerrar) o 'quit' ("Salir" desde la bandeja). El renderer
+  // decide qué mostrar según haya o no descargas pendientes.
   onAskCloseBehavior: (callback) =>
-    ipcRenderer.on('close:ask-behavior', () => callback()),
+    ipcRenderer.on('close:ask-behavior', (_event, payload) => callback(payload || {})),
   respondCloseBehavior: (payload) => ipcRenderer.send('close:behavior-response', payload),
 
   // ---- Modo Terminal (ejecutar comandos de yt-dlp "en crudo") ----
@@ -88,6 +105,7 @@ contextBridge.exposeInMainWorld('yoinksAPI', {
   // El main process los inyecta por nosotros (ver 'preview:set-headers').
   setPreviewHeaders: (entries) => ipcRenderer.invoke('preview:set-headers', entries),
 
+  recordDownloadError: (opts) => ipcRenderer.invoke('history:record-error', opts),
   getSettings: () => ipcRenderer.invoke('settings:get'),
   saveSettings: (settings) => ipcRenderer.invoke('settings:save', settings),
   resetSettings: () => ipcRenderer.invoke('settings:reset'),
@@ -111,8 +129,13 @@ contextBridge.exposeInMainWorld('yoinksAPI', {
   updateYtDlp: () => ipcRenderer.invoke('update:ytdlp'),
   updateFfmpeg: () => ipcRenderer.invoke('update:ffmpeg'),
   updateDeno: () => ipcRenderer.invoke('update:deno'),
+  updatePotProvider: () => ipcRenderer.invoke('update:pot'),
   checkForUpdates: () => ipcRenderer.invoke('update:check'),
   playNotificationSound: () => ipcRenderer.invoke('app:play-notification-sound'),
+  cancelFetch: () => ipcRenderer.invoke('app:cancel-fetch'),
+  exportHistory: (entries) => ipcRenderer.invoke('history:export', entries),
+  showNotification: (payload) => ipcRenderer.invoke('app:notify', payload),
+  powerAction: (action) => ipcRenderer.invoke('app:power-action', action),
   onUpdateProgress: (callback) =>
     ipcRenderer.on('update:progress', (_event, data) => callback(data)),
 });

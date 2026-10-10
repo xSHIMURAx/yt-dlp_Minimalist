@@ -4,6 +4,20 @@ const keepInBackgroundCheckbox = document.getElementById('keep-in-background');
 const savedEl = document.getElementById('saved');
 const syncHintEl = document.getElementById('sync-hint');
 
+chrome.storage.sync.get({ overlayTheme: 'light' }, (data) => {
+  const cur = document.querySelector(`input[name="theme"][value="${data.overlayTheme === 'dark' ? 'dark' : 'light'}"]`);
+  if (cur) cur.checked = true;
+});
+document.querySelectorAll('input[name="theme"]').forEach((radio) => {
+  radio.addEventListener('change', () => {
+    if (!radio.checked) return;
+    chrome.storage.sync.set({ overlayTheme: radio.value }, () => {
+      savedEl.classList.add('show');
+      setTimeout(() => savedEl.classList.remove('show'), 1200);
+    });
+  });
+});
+
 chrome.storage.sync.get({ overlayMode: 'icon', extensionKeepInBackground: false }, (data) => {
   const current = document.querySelector(`input[name="mode"][value="${data.overlayMode}"]`);
   if (current) current.checked = true;

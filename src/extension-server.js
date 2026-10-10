@@ -29,20 +29,48 @@ function isHttpUrl(value) {
 // extensión. Cualquier forma inesperada se trata como "sin calidad elegida"
 // en vez de rechazar el request entero — así una extensión desactualizada o
 // con un bug nunca rompe el flujo normal de "mandar la URL".
+const QUALITY_AUDIO_FORMATS = ['mp3', 'm4a', 'opus'];
+const QUALITY_AUDIO_BITRATES = [320, 256, 192, 160, 128, 96, 64];
+const QUALITY_VIDEO_CONTAINERS = ['mp4', 'webm'];
+const MAX_TRIM_SECONDS = 24 * 3600;
+
+// Tramo a recortar opcional ({ start, end } en segundos). Cualquier forma
+// inesperada (o un tramo vacío/invertido) se descarta y la descarga sigue sin
+// recorte, en vez de rechazar el pedido entero.
+function sanitizeTrim(value) {
+  if (!value || typeof value !== 'object') return null;
+  const start = Number(value.start);
+  const end = Number(value.end);
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
+  if (start < 0 || end <= start || end > MAX_TRIM_SECONDS) return null;
+  return { start: Math.floor(start), end: Math.ceil(end) };
+}
+
 function sanitizeQuality(value) {
   if (!value || typeof value !== 'object') return null;
-  if (value.type === 'best') return { type: 'best' };
-  if (value.type === 'audio') {
-    const format = ['mp3', 'm4a', 'opus'].includes(value.format) ? value.format : 'mp3';
-    return { type: 'audio', format };
-  }
-  if (value.type === 'video') {
+  const trim = sanitizeTrim(value.trim);
+  const container = QUALITY_VIDEO_CONTAINERS.includes(value.container) ? value.container : undefined;
+  let out = null;
+  if (value.type === 'best') {
+    out = { type: 'best' };
+    if (container) out.container = container;
+  } else if (value.type === 'thumb') {
+    // Solo la miniatura del video (sin descargar video ni audio).
+    out = { type: 'thumb' };
+  } else if (value.type === 'audio') {
+    const format = QUALITY_AUDIO_FORMATS.includes(value.format) ? value.format : 'mp3';
+    out = { type: 'audio', format };
+    const kbps = Number(value.bitrateKbps);
+    if (QUALITY_AUDIO_BITRATES.includes(kbps)) out.bitrateKbps = kbps;
+  } else if (value.type === 'video') {
     const height = Number(value.height);
     if (Number.isFinite(height) && height > 0 && height <= 8640) {
-      return { type: 'video', height };
+      out = { type: 'video', height };
+      if (container) out.container = container;
     }
   }
-  return null;
+  if (out && trim) out.trim = trim;
+  return out;
 }
 
 // Valida el id que la extensión puede mandar para esta descarga puntual

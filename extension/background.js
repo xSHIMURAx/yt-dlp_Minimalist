@@ -188,7 +188,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       // coincide con "clientId" (la app respeta el que le mandamos), pero
       // si por lo que sea no vino en la respuesta, usamos igual el nuestro.
       const id = data && data.id ? data.id : clientId;
-      recordHistory({ url: message.url, title: message.title || '', status: 'sent', quality: message.quality || null, downloadId: id });
+      recordHistory({ url: message.url, title: message.title || '', thumbnail: message.thumbnail || null, status: 'sent', quality: message.quality || null, downloadId: id });
       maybeOpenPopupOnDownload();
       // Se guarda acá (y no solo cuando el popup manda el mensaje) para
       // que el popup pueda retomar el progreso la próxima vez que se
@@ -224,7 +224,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       // descarga directo y la registra con ESTE MISMO id — el popup, que ya
       // empezó a sondear /progress con él (ver needsProtocol en popup.js),
       // no tiene que esperar ninguna respuesta para encontrarla.
-      recordHistory({ url: message.url, title: message.title || '', status: 'protocol', quality: message.quality || null });
+      recordHistory({ url: message.url, title: message.title || '', thumbnail: message.thumbnail || null, status: 'protocol', quality: message.quality || null });
       addActiveDownload({
         id: clientId,
         url: message.url,

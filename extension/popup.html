@@ -5,10 +5,10 @@
   <title>YT-DLP Minimalist</title>
   <style>
     body {
-      width: 430px;
+      width: 400px;
       margin: 0;
-      padding: 16px;
-      background: #0d0d0d;
+      padding: 10px 14px 25px;
+      background: #0d0d1a;
       color: #e6e6e6;
       font-family: -apple-system, "Segoe UI", Arial, sans-serif;
       /* El panel de ajustes (#settingsPanel) es un dropdown flotante que se
@@ -63,9 +63,9 @@
     #qualitySelect {
       width: 100%;
       padding: 8px 9px;
-      background: #171717;
+      background: rgba(255,255,255,0.06);
       color: #e6e6e6;
-      border: 1px solid #2a2a2a;
+      border: 1px solid #3a3a3a;
       border-radius: 6px;
       font-size: 12.5px;
       cursor: pointer;
@@ -77,7 +77,7 @@
       width: 100%;
       padding: 10px;
       background: #f5f5f5;
-      color: #0d0d0d;
+      color: #0d0d1a;
       border: none;
       border-radius: 6px;
       font-size: 13px;
@@ -111,7 +111,7 @@
       align-items: center;
       gap: 4px;
       padding-right: 6px;
-      border-right: 1px solid #2a2a2a;
+      border-right: 1px solid #3a3a3a;
     }
     .quick-icon-btn {
       width: auto;
@@ -128,7 +128,7 @@
     }
     .quick-icon-btn:hover {
       color: #e6e6e6;
-      background: #171717;
+      background: rgba(255,255,255,0.06);
     }
     .quick-icon-btn svg {
       width: 15px;
@@ -143,7 +143,7 @@
       cursor: pointer;
     }
     .quick-toggle:hover {
-      background: #171717;
+      background: rgba(255,255,255,0.06);
     }
     .quick-toggle-label {
       font-size: 10px;
@@ -166,7 +166,7 @@
     .toggle-slider {
       position: absolute;
       inset: 0;
-      background: #2a2a2a;
+      background: #3a3a3a;
       border-radius: 999px;
       transition: background 0.15s ease;
     }
@@ -182,11 +182,11 @@
       transition: transform 0.15s ease;
     }
     .toggle-switch input:checked + .toggle-slider {
-      background: #5aa9ff;
+      background: #f2f2f2;
     }
     .toggle-switch input:checked + .toggle-slider::before {
       transform: translateX(12px);
-      background: #0d0d0d;
+      background: #0d0d1a;
     }
     #optionsLink {
       display: flex;
@@ -204,11 +204,11 @@
     }
     #optionsLink:hover {
       color: #e6e6e6;
-      background: #171717;
+      background: rgba(255,255,255,0.06);
     }
     #optionsLink[aria-expanded="true"] {
       color: #f5f5f5;
-      background: #1f1f1f;
+      background: rgba(255,255,255,0.1);
     }
     #optionsLink svg {
       width: 16px;
@@ -227,8 +227,8 @@
          cada vez que se abre. */
       position: fixed;
       width: 230px;
-      background: #141414;
-      border: 1px solid #2a2a2a;
+      background: #16162a;
+      border: 1px solid #3a3a3a;
       border-radius: 8px;
       overflow: hidden;
       box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
@@ -250,7 +250,7 @@
       cursor: pointer;
     }
     label.option:hover {
-      background: #171717;
+      background: rgba(255,255,255,0.06);
     }
     label.option input {
       accent-color: #f5f5f5;
@@ -297,7 +297,7 @@
     #tabBar {
       display: flex;
       gap: 18px;
-      border-bottom: 1px solid #2a2a2a;
+      border-bottom: 1px solid #3a3a3a;
       margin-bottom: 14px;
     }
     .tab-btn {
@@ -326,8 +326,8 @@
       color: #c9c9c9;
     }
     .tab-btn.active {
-      color: #5aa9ff;
-      border-bottom-color: #5aa9ff;
+      color: #f2f2f2;
+      border-bottom-color: #f2f2f2;
     }
     .tab-panel {
       display: none;
@@ -352,7 +352,7 @@
     }
     .progress-card {
       position: relative;
-      border: 1px solid #2a2a2a;
+      border: 1px solid #3a3a3a;
       border-radius: 8px;
       padding: 10px 28px 10px 12px;
       transition: opacity 0.3s ease, transform 0.3s ease, max-height 0.3s ease, margin 0.3s ease, padding 0.3s ease;
@@ -411,8 +411,8 @@
     .progress-bar-wrap {
       width: 100%;
       height: 8px;
-      background: #1c1c1c;
-      border: 1px solid #2a2a2a;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid #3a3a3a;
       border-radius: 999px;
       overflow: hidden;
       margin-bottom: 8px;
@@ -435,8 +435,10 @@
       background: #ff8080;
     }
     @keyframes indeterminate-slide {
-      0% { margin-left: -40%; }
-      100% { margin-left: 100%; }
+      /* transform en vez de margin-left: no fuerza reflow en cada cuadro.
+         El % de translateX es del propio ancho de la barra (40% del carril). */
+      0% { transform: translateX(-100%); }
+      100% { transform: translateX(250%); }
     }
     .progress-status-row {
       display: flex;
@@ -472,11 +474,11 @@
     .pause-btn, .resume-btn {
       background: none;
       color: #e6e6e6;
-      border: 1px solid #2a2a2a;
+      border: 1px solid #3a3a3a;
     }
     .pause-btn:hover:not(:disabled), .resume-btn:hover:not(:disabled) {
       border-color: #4a4a4a;
-      background: #171717;
+      background: rgba(255,255,255,0.06);
     }
     /* pause-btn y resume-btn nunca se muestran juntos: cuál de los dos está
        visible depende del estado (descargando -> pausar, en pausa -> reanudar).
@@ -487,12 +489,12 @@
     }
     .resume-btn {
       display: none;
-      color: #5aa9ff;
-      border-color: rgba(90, 169, 255, 0.4);
+      color: #f2f2f2;
+      border-color: #3a3a3a;
     }
     .resume-btn:hover:not(:disabled) {
-      border-color: #5aa9ff;
-      background: rgba(90, 169, 255, 0.1);
+      border-color: #f2f2f2;
+      background: rgba(255,255,255,0.06);
     }
     .resume-btn.show {
       display: block;
@@ -531,12 +533,12 @@
     }
     .filter-btn:hover:not(:disabled) {
       color: #c9c9c9;
-      background: #171717;
+      background: rgba(255,255,255,0.06);
     }
     .filter-btn.active {
-      background: rgba(90, 169, 255, 0.14);
-      color: #5aa9ff;
-      border-color: rgba(90, 169, 255, 0.4);
+      background: rgba(255,255,255,0.08);
+      color: #f2f2f2;
+      border-color: #3a3a3a;
     }
     #clearHistoryBtn {
       width: 26px;
@@ -548,7 +550,7 @@
       justify-content: center;
       background: none;
       color: #6b6b6b;
-      border: 1px solid #2a2a2a;
+      border: 1px solid #3a3a3a;
       border-radius: 6px;
       cursor: pointer;
     }
@@ -573,7 +575,7 @@
     }
     #progressEmptyState {
       display: none;
-      color: #6b6b6b;
+      color: #a0a0a0;
       font-size: 12px;
       text-align: center;
       padding: 34px 10px;
@@ -584,7 +586,7 @@
     #progressEmptySubtext {
       margin-top: 4px;
       font-size: 11px;
-      color: #555;
+      color: #8a8a8a;
     }
     #historyList {
       list-style: none;
@@ -597,7 +599,7 @@
       overflow-y: auto;
     }
     li.entry {
-      border: 1px solid #2a2a2a;
+      border: 1px solid #3a3a3a;
       border-radius: 8px;
       padding: 9px 10px;
     }
@@ -637,8 +639,8 @@
       white-space: nowrap;
     }
     .entry-status.sent {
-      background: rgba(90, 169, 255, 0.12);
-      color: #5aa9ff;
+      background: rgba(255,255,255,0.08);
+      color: #f2f2f2;
     }
     .entry-status.protocol {
       background: rgba(240, 190, 90, 0.12);
@@ -665,24 +667,228 @@
       font-weight: 600;
       background: none;
       color: #c9c9c9;
-      border: 1px solid #2a2a2a;
+      border: 1px solid #3a3a3a;
       border-radius: 6px;
       cursor: pointer;
     }
     .entry-action-btn:hover:not(:disabled) {
       border-color: #4a4a4a;
       color: #f5f5f5;
-      background: #171717;
+      background: rgba(255,255,255,0.06);
     }
     .entry-action-btn.error {
       color: #ff8080;
       border-color: #3a2020;
     }
-  </style>
+
+    /* =====================================================================
+       Skin "Programa": mismo look que YT-DLP Minimalist de escritorio
+       (terminal oscura, monoespaciada, escala de grises, acento cian).
+       Compacto. Va al final para pisar los estilos base de arriba.
+       ===================================================================== */
+    :root {
+      --bg: #0d0d0d;
+      --bar: #161616;
+      --surface: #141414;
+      --surface2: #1a1a1a;
+      --border: #3a3a3a;
+      --accent: #f2f2f2;
+      --cyan: #29e6e6;
+      --text: #e8e8e8;
+      --dim: #7a7a7a;
+      --dimmer: #4d4d4d;
+      --mono: 'Cascadia Code', 'Consolas', 'SF Mono', 'JetBrains Mono', monospace;
+    }
+    html { background: var(--bg); }
+    body { background: var(--bg); color: var(--text); font-family: var(--mono); -webkit-font-smoothing: antialiased; }
+    button, input, select { font-family: var(--mono); }
+    #headerRow { padding-bottom: 8px; margin-bottom: 8px; border-bottom: 1px solid var(--border); }
+    h1 { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+    h1 .logo { width: 22px; height: 22px; border-radius: 3px; display: inline-flex; align-items: center; justify-content: center; color: var(--dim); background: transparent; border: 1px solid var(--border); box-shadow: none; }
+    h1 .logo svg { width: 13px; height: 13px; }
+    h1 .brand { font-size: 11px; font-weight: 600; letter-spacing: 0; color: var(--text); white-space: nowrap; }
+
+    #optionsLink { color: var(--dim); border: 1px solid transparent; border-radius: 3px; }
+    #optionsLink:hover, #optionsLink[aria-expanded="true"] { color: var(--text); background: #262626; border-color: transparent; }
+    #settingsPanel { width: 270px; background: var(--bar); border: 1px solid var(--border); border-radius: 4px; box-shadow: 0 8px 24px rgba(0,0,0,0.6); }
+    #headerControls { gap: 4px; }
+    #quickToolbar { flex-wrap: nowrap; gap: 2px; border-right: 1px solid var(--border); padding: 0 6px 0 0; }
+    .quick-toggle { padding: 3px 4px; gap: 4px; border-radius: 3px; }
+    .quick-icon-btn { border-radius: 3px; padding: 4px; }
+    .quick-toggle-label { font-size: 9.5px; color: var(--dim); }
+    #settingsPanel .setting-title { color: var(--dim); text-transform: none; letter-spacing: 0; font-size: 11px; font-weight: 600; }
+    label.option input { accent-color: var(--accent); }
+    .toggle-switch input:checked + .toggle-slider { background: var(--accent); }
+    .toggle-switch input:checked + .toggle-slider::before { background: #111; }
+    .quick-icon-btn:hover, .quick-toggle:hover, label.option:hover { background: #1e1e1e; }
+
+    /* Pestañas Descargar / Progreso / Historial */
+    #tabBar { gap: 0; border-bottom: 1px solid var(--border); margin-bottom: 10px; padding: 0; background: transparent; border-top: 0; border-left: 0; border-right: 0; border-radius: 0; }
+    .tab-btn { flex: 1; margin: 0 0 -1px; padding: 6px 4px; border: 0; border-bottom: 1px solid transparent; border-radius: 0; background: transparent; color: var(--dim); text-transform: none; letter-spacing: 0; font-size: 11.5px; font-weight: 400; }
+    .tab-btn:hover { color: var(--text); background: #1a1a1a; }
+    .tab-btn.active { color: var(--text); font-weight: 600; background: transparent; box-shadow: none; border-bottom-color: var(--accent); }
+
+    /* Tarjeta del video */
+    #videoCard { display: flex; gap: 10px; align-items: center; padding: 8px; margin-bottom: 12px; background: transparent; border: 1px dashed var(--border); border-radius: 4px; box-shadow: none; }
+    #videoThumb, #videoThumbFallback { width: 80px; height: 54px; border-radius: 4px; flex-shrink: 0; object-fit: cover; background: var(--surface); border: 1px solid var(--border); }
+    #videoThumb[hidden] { display: none; }
+    #videoThumbFallback { display: flex; align-items: center; justify-content: center; color: var(--dimmer); }
+    #videoThumbFallback svg { width: 22px; height: 22px; }
+    #videoThumbFallback.hide { display: none; }
+    #videoInfo { min-width: 0; flex: 1; }
+    #pageTitle { margin: 0; max-height: none; color: var(--text); font-size: 12px; font-weight: 600; line-height: 1.3; -webkit-line-clamp: 2; }
+    #videoHost { margin-top: 2px; font-size: 11px; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #videoHost:not(:empty)::before { content: '▸ '; color: var(--dimmer); }
+
+    .section-label { margin: 0 0 6px; font-size: 11px; font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--dim); }
+    .section-label::before { content: '// '; color: var(--dimmer); }
+
+    /* Selector de tipo (Video / Audio) y sub-formatos */
+    #typeTabs, #formatTabs, #containerTabs { display: flex; gap: 0; padding: 0; margin-bottom: 8px; border: 1px solid var(--border); border-radius: 3px; background: transparent; overflow: hidden; }
+    #formatTabs[hidden], #containerTabs[hidden] { display: none; }
+    .type-tab, .fmt-tab { flex: 1; width: auto; padding: 6px 4px; background: transparent; border: 0; border-right: 1px solid var(--border); border-radius: 0; color: var(--dim); font-size: 11.5px; font-weight: 400; letter-spacing: 0; text-transform: uppercase; cursor: pointer; }
+    .type-tab:last-child, .fmt-tab:last-child { border-right: 0; }
+    .type-tab:hover:not(:disabled), .fmt-tab:hover:not(:disabled) { background: #1a1a1a; color: var(--text); }
+    .type-tab.active, .fmt-tab.active { background: var(--accent); color: #111; font-weight: 600; box-shadow: none; }
+    .type-tab.active:hover, .fmt-tab.active:hover { background: var(--accent) !important; color: #111 !important; }
+
+    /* Lista de calidades */
+    #qualityList { max-height: 190px; overflow-y: auto; margin-bottom: 0; border: 1px solid var(--border); border-radius: 4px; background: transparent; }
+    #qualityList::-webkit-scrollbar { width: 10px; }
+    #qualityList::-webkit-scrollbar-thumb { background: var(--border); border-radius: 5px; border: 2px solid var(--bg); background-clip: padding-box; }
+    #qualityList::-webkit-scrollbar-track { background: transparent; }
+    .q-row { display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 12px; background: none; border: 0; border-bottom: 1px solid #1f1f1f; border-radius: 0; color: var(--dim); font-size: 12px; font-weight: 400; text-align: left; cursor: pointer; }
+    .q-row:last-child { border-bottom: 0; }
+    .q-row:hover:not(:disabled) { background: #1a1a1a; color: var(--text); }
+    .q-row.selected { background: #1a1a1a; color: var(--text); font-weight: 600; box-shadow: none; }
+    .q-radio { width: 10px; height: 10px; flex-shrink: 0; border: 0; border-radius: 0; position: relative; }
+    .q-radio::before { content: '▸'; position: absolute; left: 0; top: -3px; font-size: 12px; line-height: 16px; color: transparent; }
+    .q-row:hover .q-radio::before { color: var(--dimmer); }
+    .q-row.selected .q-radio::before { color: var(--text); }
+    .q-name { flex: 0 1 auto; }
+    .q-badge { padding: 1px 5px; border-radius: 3px; font-size: 10px; font-weight: 700; letter-spacing: 0.02em; border: 1px solid transparent; white-space: nowrap; line-height: 1.3; }
+    .q-badge.b-best { color: var(--cyan); border-color: rgba(41,230,230,0.4); }
+    .q-badge.b-4k { color: #062626; background: var(--cyan); border-color: var(--cyan); }
+    .q-badge.b-2k { color: var(--cyan); border-color: rgba(41,230,230,0.35); background: transparent; }
+    .q-badge.b-fhd, .q-badge.b-hd { color: #7ee787; border-color: rgba(126,231,135,0.35); background: transparent; }
+    .q-badge.b-sd { color: #e0b163; border-color: rgba(224,177,99,0.3); background: transparent; }
+    .q-fmt { margin-left: auto; font-size: 10.5px; font-weight: 400; color: var(--dimmer); text-transform: uppercase; }
+    body.ext-disabled #typeTabs, body.ext-disabled #qualityList { opacity: 0.45; pointer-events: none; }
+
+    /* Botón principal (como #yoink-btn) */
+    #sendBtn { margin-top: 25px; padding: 9px 10px; background: var(--accent); color: #111; border: none; border-radius: 3px; font-size: 13px; font-weight: 600; letter-spacing: 0; text-transform: none; box-shadow: none; transition: background .15s; }
+    #sendBtn:hover:not(:disabled) { background: #ffffff; color: #111; box-shadow: none; }
+    #sendBtn:disabled { background: var(--accent); opacity: 0.5; color: #111; border: none; box-shadow: none; }
+    #status.success { color: #7ac97a; }
+    #status:empty { display: none; }
+    body { padding-bottom: 12px; }
+
+    #sendAppBtn { margin-top: 8px; padding: 8px 10px; background: transparent; color: var(--text); border: 1px solid var(--border); border-radius: 3px; font-size: 12px; font-weight: 400; }
+    #sendAppBtn:hover:not(:disabled) { background: #1a1a1a; border-color: var(--dimmer); }
+    #sendAppBtn:disabled { background: transparent; color: var(--dimmer); opacity: 0.6; }
+
+    /* Progreso / historial */
+    li.entry { display: flex; gap: 10px; align-items: flex-start; }
+    .entry-body { flex: 1; min-width: 0; }
+    .entry-thumb { width: 96px; height: 54px; flex-shrink: 0; object-fit: cover; border-radius: 4px; border: 1px solid var(--border); background: var(--surface); }
+    .progress-card, li.entry { background: var(--surface); border-color: var(--border); border-radius: 4px; }
+    .progress-bar-fill { background: var(--accent); }
+    .progress-bar-fill.done { background: #7ac97a; }
+    .progress-bar-wrap { background: #1f1f1f; border-color: transparent; border-radius: 2px; }
+    .resume-btn { color: var(--text); border-color: var(--border); }
+
+    /* ---- Pestaña Progreso (v18) ---- */
+    .progress-card [hidden] { display: none !important; }
+    .progress-head { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; }
+    .progress-head .progress-title { flex: 1; min-width: 0; margin-bottom: 0; }
+    .progress-thumb { width: 64px; height: 36px; flex-shrink: 0; object-fit: cover; border-radius: 3px; border: 1px solid var(--border); background: var(--bg); }
+
+    /* Barra segmentada, estilo terminal: [██████░░░░░░]. El carril dibuja los
+       bloques apagados y el relleno los muestra encendidos con una máscara
+       con el mismo patrón (6px de bloque + 2px de hueco), así quedan alineados. */
+    .progress-bar-wrap {
+      height: 10px; padding: 0; border: 0; border-radius: 0;
+      background: repeating-linear-gradient(90deg, #2a2a2a 0 6px, transparent 6px 8px);
+    }
+    .progress-bar-fill {
+      border-radius: 0;
+      -webkit-mask-image: repeating-linear-gradient(90deg, #000 0 6px, transparent 6px 8px);
+      mask-image: repeating-linear-gradient(90deg, #000 0 6px, transparent 6px 8px);
+    }
+
+    .progress-status-row { gap: 8px; }
+    .progress-percent { flex-shrink: 0; font-size: 12.5px; font-weight: 600; color: var(--text); }
+    .progress-percent, .progress-meta { font-variant-numeric: tabular-nums; }
+    .progress-meta { overflow-wrap: anywhere; }
+    .progress-actions { margin-top: 8px; }
+    /* Estado vacío: acción directa + contador en la pestaña */
+    #progressGoDownload { display: inline-block; width: auto; margin-top: 14px; padding: 6px 12px; background: transparent; color: var(--text); border: 1px solid var(--border); border-radius: 3px; font-size: 12px; font-weight: 400; cursor: pointer; }
+    #progressGoDownload::before { content: '▸ '; color: var(--dim); }
+    #progressGoDownload:hover { background: #1a1a1a; border-color: var(--dimmer); }
+    .tab-badge { min-width: 14px; margin-left: 4px; padding: 0 4px; border-radius: 2px; background: var(--accent); color: #111; font-size: 10px; font-weight: 700; line-height: 14px; text-align: center; font-variant-numeric: tabular-nums; }
+    .tab-badge.error { background: #ff8080; }
+    .tab-badge[hidden] { display: none; }
+    @media (prefers-reduced-motion: reduce) {
+      .progress-bar-fill.indeterminate { animation: none; }
+      .progress-card { transition: none; }
+    }
+
+    /* Recortar (opcional) */
+    #trimBox { margin: -4px 0 8px; }
+    #trimToggle { display: flex; width: 100%; align-items: center; justify-content: space-between; padding: 4px 0; background: none; border: 0; border-radius: 0; cursor: pointer; }
+    #trimToggle:hover:not(:disabled) { background: none; }
+    #trimToggle .section-label { margin: 0; }
+    .trim-caret { color: var(--dim); font-size: 10px; transition: transform .15s; }
+    #trimToggle[aria-expanded="true"] .trim-caret { transform: rotate(90deg); }
+    #trimFields { display: flex; gap: 8px; padding-top: 4px; }
+    #trimFields[hidden] { display: none; }
+    #trimFields label { flex: 1; display: flex; flex-direction: column; gap: 3px; font-size: 10.5px; font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--dim); }
+    #trimFields input { width: 100%; box-sizing: border-box; padding: 6px 8px; background: transparent; color: var(--text); border: 1px solid var(--border); border-radius: 3px; font-size: 12px; font-weight: 400; text-align: center; outline: none; }
+    #trimFields input:focus { border-color: var(--dim); box-shadow: none; }
+
+    /* ---- Extras de Progreso (v21) ---- */
+    /* Resumen + "Limpiar finalizadas" */
+    #progressToolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; min-height: 24px; }
+    #progressToolbar[hidden] { display: none; }
+    #progressSummary { flex: 1; min-width: 0; font-size: 11.5px; color: var(--dim); font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #progressSummary .sum-part.live { color: var(--text); }
+    #progressSummary .sum-part.warn { color: #f0be5a; }
+    #progressSummary .sum-part.err { color: #ff8080; }
+    #progressSummary .sum-sep { color: var(--dimmer); }
+    #clearFinishedBtn { width: auto; flex-shrink: 0; padding: 4px 9px; background: transparent; color: var(--dim); border: 1px solid var(--border); border-radius: 3px; font-size: 11px; font-weight: 400; cursor: pointer; }
+    #clearFinishedBtn[hidden] { display: none; }
+    #clearFinishedBtn:hover:not(:disabled) { color: var(--text); background: #1a1a1a; border-color: var(--dimmer); }
+
+    /* Alto de la lista: 420px en el popup (Chrome lo limita a ~600px, así que
+       100vh - 230px nunca supera 420 ahí). En una superficie más alta (panel
+       lateral, ventana flotante) aprovecha todo el alto disponible. */
+    #progressList { max-height: max(420px, calc(100vh - 230px)); }
+
+    /* "Sin conexión con la app": punto de advertencia en vez de solo texto gris */
+    .progress-status-text.offline { color: #f0be5a; }
+    .progress-status-text.offline::before {
+      content: ''; display: inline-block; width: 8px; height: 8px; margin-right: 7px;
+      border-radius: 50%; background: #f0be5a; vertical-align: baseline; position: relative; top: -1px;
+      box-shadow: 0 0 0 0 rgba(240, 190, 90, 0.55); animation: offline-pulse 1.8s ease-out infinite;
+    }
+    @keyframes offline-pulse {
+      0%   { box-shadow: 0 0 0 0 rgba(240, 190, 90, 0.55); }
+      70%  { box-shadow: 0 0 0 6px rgba(240, 190, 90, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(240, 190, 90, 0); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .progress-status-text.offline::before { animation: none; }
+    }
+    </style>
 </head>
 <body>
   <div id="headerRow">
-    <h1>YT-DLP MINIMALIST</h1>
+    <h1>
+      <span class="logo">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 18v-6a9 9 0 0 1 18 0v6"></path><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"></path></svg>
+      </span>
+      <span class="brand">YT-DLP MINIMALIST</span>
+    </h1>
     <div id="headerControls">
       <div id="quickToolbar">
         <button id="openAppBtn" class="quick-icon-btn" title="Abrir el programa" data-i18n-title="open_app_title">
@@ -728,6 +934,15 @@
           <span class="option-title" data-i18n="overlay_text_title">Ícono + texto "Descargar"</span>
           <span class="option-desc" data-i18n="overlay_text_desc">Más visible, con el texto al lado del ícono.</span>
         </span>
+      </label>
+      <div class="setting-title" data-i18n="settings_theme_legend">Tema del botón flotante</div>
+      <label class="option">
+        <input type="radio" name="theme" value="light" />
+        <span class="option-text"><span class="option-title" data-i18n="overlay_theme_light">Claro</span></span>
+      </label>
+      <label class="option">
+        <input type="radio" name="theme" value="dark" />
+        <span class="option-text"><span class="option-title" data-i18n="overlay_theme_dark">Oscuro</span></span>
       </label>
       <div class="setting-title" data-i18n="settings_downloads_legend" style="margin-top: 4px; border-top: 1px solid #2a2a2a; padding-top: 8px;">Descargas desde la extensión</div>
       <label class="option" id="keepAppInBackgroundOption">
@@ -794,6 +1009,7 @@
         <polyline points="21 3 21 9 15 9"></polyline>
       </svg>
       <span data-i18n="tab_progress">Progreso</span>
+      <span class="tab-badge" id="progressBadge" hidden></span>
     </button>
     <button class="tab-btn" id="tabBtnHistory" data-tab="history">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -806,9 +1022,42 @@
 
   <div id="downloadTab" class="tab-panel active">
     <div id="sendScreen">
-      <div id="pageTitle" data-i18n="loading_tab">Cargando pestaña…</div>
-      <div id="qualityRow">
-        <label for="qualitySelect" data-i18n="quality_label">Calidad</label>
+      <div id="videoCard">
+        <img id="videoThumb" alt="" hidden />
+        <div id="videoThumbFallback">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>
+        </div>
+        <div id="videoInfo">
+          <div id="pageTitle" data-i18n="loading_tab">Cargando pestaña…</div>
+          <div id="videoHost"></div>
+        </div>
+      </div>
+
+      <div class="section-label" data-i18n="skin_select_quality">Seleccionar calidad</div>
+
+      <div id="typeTabs" role="tablist">
+        <button type="button" class="type-tab active" data-type="video" role="tab" data-i18n="skin_tab_video">Video</button>
+        <button type="button" class="type-tab" data-type="audio" role="tab" data-i18n="skin_tab_audio">Audio</button>
+        <button type="button" class="type-tab" data-type="thumb" role="tab" data-i18n="skin_tab_thumb">Miniatura</button>
+      </div>
+
+      <div id="formatTabs" role="tablist" hidden>
+        <button type="button" class="fmt-tab" data-fmt="mp3">MP3</button>
+        <button type="button" class="fmt-tab" data-fmt="m4a">M4A</button>
+        <button type="button" class="fmt-tab" data-fmt="opus">OPUS</button>
+      </div>
+
+      <div id="containerTabs" role="tablist" hidden>
+        <button type="button" class="fmt-tab" data-cont="mp4">MP4</button>
+        <button type="button" class="fmt-tab" data-cont="mkv">MKV</button>
+        <button type="button" class="fmt-tab" data-cont="webm">WEBM</button>
+      </div>
+
+      <div id="qualityList" role="radiogroup"></div>
+
+      <!-- La fuente de verdad sigue siendo este <select>: popup.js lo lee al
+           enviar y lo guarda en storage. La interfaz de arriba solo lo maneja. -->
+      <div id="qualityRow" hidden>
         <select id="qualitySelect">
           <option value="best" data-i18n="quality_opt_best">Mejor calidad (video+audio)</option>
           <option value="video:2160" data-i18n="quality_opt_2160">2160p 4K</option>
@@ -824,15 +1073,25 @@
           <option value="audio:opus" data-i18n="quality_opt_audio_opus">Solo audio (OPUS)</option>
         </select>
       </div>
-      <button id="sendBtn" data-i18n="send_button">Enviar a YT-DLP Minimalist</button>
+
+      <button id="sendBtn">DESCARGAR</button>
+      <button id="sendAppBtn" type="button" data-i18n="send_to_app">Enviar al programa</button>
       <div id="status"></div>
     </div>
   </div>
 
   <div id="progressTab" class="tab-panel">
+    <!-- Resumen de todas las descargas ("2 descargando · 1 en pausa") + botón
+         para sacar de una vez las que ya terminaron. Se oculta solo cuando no
+         hay tarjetas (ver updateProgressSummary en popup.js). -->
+    <div id="progressToolbar" hidden>
+      <div id="progressSummary" role="status" aria-live="polite" aria-atomic="true"></div>
+      <button type="button" id="clearFinishedBtn" hidden data-i18n="clear_finished_btn" data-i18n-title="clear_finished_title" title="Quitar de la lista las descargas terminadas, en espera o sin conexión">Limpiar</button>
+    </div>
     <div id="progressEmptyState" class="show">
       <div id="progressEmptyText" data-i18n="progress_empty_title">No hay descargas en curso.</div>
       <div id="progressEmptySubtext" data-i18n="progress_empty_subtext">Mandá un video desde la pestaña "Descargar" para verlo acá.</div>
+      <button type="button" id="progressGoDownload" data-i18n="progress_go_download">Ir a Descargar</button>
     </div>
     <!-- Una <li class="progress-card"> por cada descarga en curso, agregada/
          quitada dinámicamente desde popup.js (ver createCard/removeCard).
@@ -865,5 +1124,6 @@
   <script src="url-utils.js"></script>
   <script src="i18n.js"></script>
   <script src="popup.js"></script>
+  <script src="skin.js"></script>
 </body>
 </html>

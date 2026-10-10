@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell, dialog, session, safeStorage, Tray, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, dialog, session, safeStorage, Tray, Menu, Notification } = require('electron');
 const path = require('path');
 
 // Nombre visible de la app y, de paso, de la carpeta de datos de usuario que
@@ -476,11 +476,14 @@ function getDefaultSettings() {
     customCookieSites: [], // sitios agregados por el usuario: [{ id, name, hostname, url }]
     rateLimit: '', // ej. "1M", "500K" — vacío = sin límite
     rateLimitMode: 'perFile', // 'perFile' = el límite se aplica a cada descarga | 'total' = se reparte entre las descargas simultáneas
-    concurrentDownloads: 1, // cuántos videos de una lista se descargan a la vez
+    concurrentDownloads: 1, // cuántos videos de una lista se descargan a la vez (1-8; se puede cambiar en vivo desde el panel de descargas)
+    autoRetries: 1, // reintentos automáticos de una descarga que falla por algo pasajero (0-5)
+    notifyOnQueueFinish: true, // notificación de escritorio cuando termina una cola de varias descargas (solo si la ventana no está en primer plano)
     concurrentFragments: 1, // conexiones/fragmentos simultáneos POR descarga (-N / --concurrent-fragments); valores más altos aceleran descargas fragmentadas (HLS/DASH) pero pueden causar bloqueos temporales
     subtitlesEnabled: false, // descargar subtítulos (--write-subs) en descargas de video
     subtitleLangs: '', // códigos de idioma separados por coma para --sub-langs; vacío = todos ("all")
     subtitleMode: 'embed', // 'embed' = incrustados en el video | 'file' = archivo .srt aparte | 'both' = ambos
+    clipboardWatch: true, // al volver a la app con un link copiado, avisa en Inicio para agregarlo
     thumbnailsEnabled: true, // incrustar la miniatura como carátula (--embed-thumbnail) — comportamiento histórico de la app
     chaptersEnabled: false, // incrustar los capítulos del video (--embed-chapters)
     ytdlpChannel: 'stable', // 'stable' | 'nightly' — de qué repo de GitHub se baja/compara yt-dlp
@@ -509,8 +512,8 @@ function detectSystemLanguage() {
 // Traducciones mínimas para textos generados en el proceso principal (menú
 // de la bandeja del sistema), que no pasan por el HTML/i18n.js del renderer.
 const TRAY_STRINGS = {
-  es: { show: 'Mostrar', quit: 'Salir' },
-  en: { show: 'Show', quit: 'Quit' },
+  es: { show: 'Mostrar', quit: 'Salir', copy: 'Copiar', selectAll: 'Seleccionar todo' },
+  en: { show: 'Show', quit: 'Quit', copy: 'Copy', selectAll: 'Select all' },
 };
 let currentTrayLanguage = 'es';
 
@@ -586,7 +589,7 @@ function sanitizeCookiesPerSite(input, extraKeys = []) {
       // "Otros sitios" y los sitios personalizados no tienen ventana de login
       // propia (ver LOGIN_SITES), así que "applogin" no aplica ahí; si llega
       // así, lo tratamos como "none".
-      if ((key === 'other' || extraKeys.includes(key)) && mode === 'applogin') mode = 'none';
+      if ((key === 'other' || key === 'youtube' || extraKeys.includes(key)) && mode === 'applogin') mode = 'none';
       result[key] = {
         mode,
         browser: (entry.browser && String(entry.browser)) || 'firefox',
@@ -609,7 +612,7 @@ function migrateLegacyCookieSettings(raw) {
   if (!raw || raw.cookiesPerSite || !raw.cookiesMode) return raw;
 
   const perSite = getDefaultCookiesPerSite();
-  if (raw.cookiesMode === 'applogin' && raw.cookiesAppLoginSite && perSite[raw.cookiesAppLoginSite]) {
+  if (raw.cookiesMode === 'applogin' && raw.cookiesAppLoginSite && raw.cookiesAppLoginSite !== 'youtube' && perSite[raw.cookiesAppLoginSite]) {
     // El login por cuenta ya era por sitio internamente (login-cookies/<sitio>.txt),
     // así que se traslada tal cual al sitio correspondiente.
     perSite[raw.cookiesAppLoginSite] = { mode: 'applogin', browser: 'firefox', file: '' };
@@ -647,6 +650,11 @@ function loadSettings() {
     merged.subtitleMode = ['file', 'both'].includes(merged.subtitleMode) ? merged.subtitleMode : 'embed';
     merged.soundStyle = merged.soundStyle === 'windows' ? 'windows' : 'chime';
     merged.extensionKeepInBackground = merged.extensionKeepInBackground === true;
+    const loadedConcurrent = parseInt(merged.concurrentDownloads, 10);
+    merged.concurrentDownloads = Number.isFinite(loadedConcurrent) ? Math.min(8, Math.max(1, loadedConcurrent)) : 1;
+    const loadedRetries = parseInt(merged.autoRetries, 10);
+    merged.autoRetries = Number.isFinite(loadedRetries) ? Math.min(5, Math.max(0, loadedRetries)) : 1;
+    merged.notifyOnQueueFinish = merged.notifyOnQueueFinish !== false;
     const fragments = parseInt(merged.concurrentFragments, 10);
     merged.concurrentFragments = Number.isFinite(fragments) ? Math.min(16, Math.max(1, fragments)) : 1;
     return merged;
@@ -659,9 +667,13 @@ function saveSettingsToDisk(settings) {
   const merged = { ...getDefaultSettings(), ...settings };
   merged.customCookieSites = sanitizeCustomCookieSites(settings.customCookieSites);
   merged.cookiesPerSite = sanitizeCookiesPerSite(settings.cookiesPerSite, merged.customCookieSites.map((s) => s.id));
-  // Limitar a un rango razonable (1-5) para evitar saturar la red o el sistema
+  // Limitar a un rango razonable (1-8) para evitar saturar la red o el sistema
   const concurrent = parseInt(merged.concurrentDownloads, 10);
-  merged.concurrentDownloads = Number.isFinite(concurrent) ? Math.min(5, Math.max(1, concurrent)) : 1;
+  merged.concurrentDownloads = Number.isFinite(concurrent) ? Math.min(8, Math.max(1, concurrent)) : 1;
+  const retries = parseInt(merged.autoRetries, 10);
+  merged.autoRetries = Number.isFinite(retries) ? Math.min(5, Math.max(0, retries)) : 1;
+  merged.notifyOnQueueFinish = merged.notifyOnQueueFinish !== false;
+  merged.clipboardWatch = merged.clipboardWatch !== false;
   // Conexiones/fragmentos simultáneos por descarga (-N): rango razonable 1-16
   const fragments = parseInt(merged.concurrentFragments, 10);
   merged.concurrentFragments = Number.isFinite(fragments) ? Math.min(16, Math.max(1, fragments)) : 1;
@@ -746,6 +758,17 @@ function buildSettingsArgs(settings, url, opts = {}) {
     args.push('--js-runtimes', `deno:${denoPath}`);
   }
 
+  // Plugin de PO Token (bgutil): lo carga yt-dlp desde la carpeta de plugins
+  // empaquetada. Sin esto, YouTube solo entrega 360p/1080p en muchos videos
+  // (sobre todo con restricción de edad) porque exige un PO Token.
+  // El plugin solo se carga cuando el servidor de PO Token ya está corriendo (ver
+  // ensurePotServerRunning): sin servidor no aporta nada, y yt-dlp se queda esperando al
+  // proveedor en cada consulta (la pantalla se quedaba en "Buscando formatos…").
+  const potPluginDir = getPotPluginDir();
+  if (potPluginDir && potServerAvailable) {
+    args.push('--plugin-dirs', potPluginDir);
+  }
+
   const perSite = settings.cookiesPerSite || getDefaultCookiesPerSite();
   const site = detectCookieSite(url, settings.customCookieSites || []);
   const siteConfig = perSite[site] || perSite.other;
@@ -766,7 +789,7 @@ function buildSettingsArgs(settings, url, opts = {}) {
       // forma transparente sin romper el flujo del usuario.
       args.push('--cookies', siteConfig.file);
     }
-  } else if (siteConfig.mode === 'applogin' && site !== 'other') {
+  } else if (siteConfig.mode === 'applogin' && site !== 'other' && site !== 'youtube') {
     // Cookies capturadas al iniciar sesión dentro de la propia app (ver sección
     // "Iniciar sesión con cuenta" más abajo), guardadas cifradas en disco.
     const cookieFile = getLoginCookiesFile(site);
@@ -796,10 +819,10 @@ function buildSettingsArgs(settings, url, opts = {}) {
 
 // Arma los argumentos de yt-dlp para subtítulos/miniatura/capítulos según lo
 // activado en Configuración → Descargas. "container" es el contenedor final
-// (mp4/mkv/webm/mov para video, o el --audio-format para audio-only); se usa
+// (mp4/mkv/webm para video, o el --audio-format para audio-only); se usa
 // para no pedir algo que ese contenedor no soporta:
-// - Miniatura incrustada: no soportada en webm, ni en audio wav.
-// - Subtítulos incrustados: yt-dlp solo los soporta en mp4/webm/mkv (no mov).
+// - Miniatura incrustada: no soportada en webm.
+// - Subtítulos incrustados: yt-dlp solo los soporta en mp4/webm/mkv.
 // - Capítulos: se dejan pedir siempre que estén activados; yt-dlp los omite
 //   sin error si el video no tiene capítulos. EXCEPTO si se está recortando
 //   el video ("Cortar video"/trimSection): --embed-chapters incrusta la
@@ -808,14 +831,67 @@ function buildSettingsArgs(settings, url, opts = {}) {
 //   pedido. El resultado es un capítulo tipo "01:52 - Outro" que no
 //   corresponde a nada del archivo recortado (que puede durar 10
 //   segundos), así que se omite --embed-chapters cuando isTrimmed es true.
+// Plantillas de nombre/carpeta con marcadores simples: "{canal}/{titulo}" se traduce a la
+// sintaxis de yt-dlp. Las plantillas que ya usan %(campo)s se dejan tal cual (compatibilidad).
+// Ejemplo: "{canal}/{fecha} - {titulo}"  ->  "%(channel,uploader|Desconocido)s/%(upload_date>%Y-%m-%d)s - %(title).200B.%(ext)s"
+const TEMPLATE_PLACEHOLDERS = {
+  canal: '%(channel,uploader|Desconocido)s',
+  channel: '%(channel,uploader|Desconocido)s',
+  titulo: '%(title).200B',
+  'título': '%(title).200B',
+  title: '%(title).200B',
+  artista: '%(artist,creator,uploader|Desconocido)s',
+  artist: '%(artist,creator,uploader|Desconocido)s',
+  autor: '%(uploader|Desconocido)s',
+  uploader: '%(uploader|Desconocido)s',
+  fecha: '%(upload_date>%Y-%m-%d|sin-fecha)s',
+  date: '%(upload_date>%Y-%m-%d|sin-fecha)s',
+  'año': '%(upload_date>%Y|sin-fecha)s',
+  anio: '%(upload_date>%Y|sin-fecha)s',
+  year: '%(upload_date>%Y|sin-fecha)s',
+  sitio: '%(extractor_key)s',
+  site: '%(extractor_key)s',
+  playlist: '%(playlist_title|Sin playlist)s',
+  indice: '%(playlist_index|)s',
+  'índice': '%(playlist_index|)s',
+  index: '%(playlist_index|)s',
+  id: '%(id)s',
+  resolucion: '%(height|)s',
+  'resolución': '%(height|)s',
+  resolution: '%(height|)s',
+  ext: '%(ext)s',
+};
+
+function resolveOutputTemplate(settings) {
+  let template = settings.outputTemplate && settings.outputTemplate.trim()
+    ? settings.outputTemplate.trim()
+    : '%(title)s.%(ext)s';
+  if (!/\{[^{}]+\}/.test(template)) return template;
+  let usedExt = false;
+  template = template.replace(/\{([^{}]+)\}/g, (match, name) => {
+    const key = name.trim().toLowerCase();
+    if (!Object.prototype.hasOwnProperty.call(TEMPLATE_PLACEHOLDERS, key)) return match;
+    if (key === 'ext') usedExt = true;
+    return TEMPLATE_PLACEHOLDERS[key];
+  });
+  if (!usedExt && !/%\(ext\)s/.test(template)) template += '.%(ext)s';
+  return template;
+}
+
 function buildMediaExtrasArgs(settings, { audioOnly, container, isTrimmed }) {
   const args = [];
+
+  // Audio: la carátula siempre se convierte a JPG antes de incrustarla. Sin la conversión,
+  // algunas miniaturas (.webp) no se ven (o no se pueden incrustar) en MP3.
+  if (audioOnly && settings.thumbnailsEnabled !== false) {
+    args.push('--convert-thumbnails', 'jpg');
+  }
 
   const thumbnailsEnabled = settings.thumbnailsEnabled !== false;
   const chaptersEnabled = settings.chaptersEnabled === true;
   const subtitlesEnabled = settings.subtitlesEnabled === true;
 
-  const supportsEmbeddedThumbnail = audioOnly ? container !== 'wav' : container !== 'webm';
+  const supportsEmbeddedThumbnail = audioOnly ? true : container !== 'webm';
   if (thumbnailsEnabled && supportsEmbeddedThumbnail) {
     args.push('--embed-thumbnail');
   }
@@ -834,7 +910,7 @@ function buildMediaExtrasArgs(settings, { audioOnly, container, isTrimmed }) {
     const subLangs = rawLangs ? `${rawLangs},-live_chat` : 'all,-live_chat';
     const mode = ['file', 'both'].includes(settings.subtitleMode) ? settings.subtitleMode : 'embed';
     const wantsEmbed = mode === 'embed' || mode === 'both';
-    // --embed-subs solo lo soporta yt-dlp en mp4/webm/mkv (no mov); si el
+    // --embed-subs solo lo soporta yt-dlp en mp4/webm/mkv; si el
     // contenedor no lo soporta, se cae a dejarlos como archivo aparte para no
     // perder silenciosamente los subtítulos pedidos.
     const canEmbed = ['mp4', 'webm', 'mkv'].includes(container);
@@ -896,7 +972,7 @@ function computeEffectiveRateLimit(settings, liveConcurrency) {
 
   const concurrency = Number.isFinite(liveConcurrency) && liveConcurrency > 0
     ? Math.floor(liveConcurrency)
-    : Math.max(1, Math.min(5, parseInt(settings.concurrentDownloads, 10) || 1));
+    : Math.max(1, Math.min(8, parseInt(settings.concurrentDownloads, 10) || 1));
   if (concurrency <= 1) return raw;
 
   const match = raw.match(/^([\d.]+)\s*([a-zA-Z]*)$/);
@@ -1172,6 +1248,17 @@ function addHistoryEntry(entry) {
   saveHistoryToDisk(history);
 }
 
+// Subconjunto de las opciones de una descarga que hace falta para repetirla igual
+// (misma calidad, formato y carpeta). Se guarda en las entradas de error del historial.
+function buildRetryPayload(opts) {
+  const keys = ['url', 'formatId', 'audioOnly', 'audioFormat', 'audioBitrateKbps', 'mergeFormat', 'presetOptions', 'title', 'site', 'label', 'thumbnail', 'outputDir', 'subfolder', 'trimSection'];
+  const payload = {};
+  keys.forEach((k) => {
+    if (opts[k] !== undefined && opts[k] !== null && opts[k] !== '') payload[k] = opts[k];
+  });
+  return payload;
+}
+
 // Versión liviana del historial para el botón flotante de la extensión de
 // navegador (ver GET /downloaded en extension-server.js): solo lo mínimo
 // para poder reconocer "esta URL ya se descargó" del lado del content
@@ -1292,13 +1379,12 @@ function createWindow(startHidden) {
       mainWindow.hide();
       return;
     }
-    if (settings.closeBehavior === 'close') {
-      return; // se deja cerrar normalmente
-    }
-
-    // 'ask' (o cualquier valor inválido): preguntamos con un diálogo nativo.
+    // 'close' y 'ask' (o cualquier valor inválido) pasan por el renderer: él sabe si
+    // hay descargas activas, en cola o pausadas (la cola vive allá, no en este
+    // proceso) y avisa antes de cerrarlas. Si no hay nada pendiente, con 'close'
+    // responde 'close' al instante y con 'ask' muestra el diálogo de siempre.
     event.preventDefault();
-    askCloseBehavior();
+    askCloseBehavior(settings.closeBehavior === 'close' ? 'close' : 'ask');
   });
 }
 
@@ -1310,10 +1396,10 @@ let closeAskPending = false;
 // Le pide al renderer que muestre el diálogo propio (mismo estilo que el
 // resto de la app) preguntando si minimizar a la bandeja o cerrar. La
 // respuesta llega por el canal 'close:behavior-response' (ver más abajo).
-function askCloseBehavior() {
-  if (!mainWindow || closeAskPending) return;
+function askCloseBehavior(mode = 'ask') {
+  if (!mainWindow || mainWindow.isDestroyed() || closeAskPending) return;
   closeAskPending = true;
-  sendToWindow('close:ask-behavior');
+  sendToWindow('close:ask-behavior', { mode });
 }
 
 ipcMain.on('close:behavior-response', (_event, payload) => {
@@ -1342,8 +1428,15 @@ function buildTrayMenu(showWindow) {
     {
       label: s.quit,
       click: () => {
-        isQuitting = true;
-        app.quit();
+        // Si hay descargas pendientes, se muestra la ventana con el aviso en vez
+        // de salir directo; el renderer responde 'close' enseguida si no hay nada.
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          if (trayShowWindow) trayShowWindow();
+          askCloseBehavior('quit');
+        } else {
+          isQuitting = true;
+          app.quit();
+        }
       },
     },
   ]);
@@ -1409,7 +1502,12 @@ function handleUrlFromExtension(url, title, quality, extId) {
     }
     sendToWindow('extension:download', { url, title: title || '', quality, extId: extId || null });
   } else {
-    sendToWindow('extension:url', url);
+    // Sin calidad el usuario elige en el picker de la app. Se manda también el
+    // extId (si lo hay) para que la descarga que arranque desde ese picker
+    // quede registrada bajo el mismo id y el popup de la extensión pueda
+    // seguir su progreso (GET /progress). Sin extId se manda el link solo,
+    // como siempre.
+    sendToWindow('extension:url', extId ? { url, extId } : url);
   }
 }
 
@@ -1676,6 +1774,10 @@ app.whenReady().then(() => {
     console.error('[main] Error en startExtensionServer:', e);
   }
 
+  // El servidor de PO Token NO se inicia aquí: arranca solo cuando se necesita
+  // (video de YouTube con restricción de edad). Ver ensurePotServerRunning().
+
+
   // Descarga ffmpeg a la carpeta administrada en segundo plano si todavía no
   // está ahí (ej. primer arranque de la app), para que esté listo cuando el
   // usuario lance su primera descarga sin tener que ir a Actualizaciones.
@@ -1701,6 +1803,7 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   isQuitting = true;
+  stopPotServer();
   if (terminalProc) {
     killProcessTree(terminalProc);
     terminalProc = null;
@@ -1760,6 +1863,16 @@ ipcMain.on('window:maximize', () => {
 });
 ipcMain.on('window:close', () => mainWindow.close());
 
+// Clic derecho sobre la salida de la terminal: Copiar / Seleccionar todo.
+ipcMain.on('terminal:context-menu', (_event, hasSelection) => {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  const strings = TRAY_STRINGS[currentTrayLanguage] || TRAY_STRINGS.es;
+  Menu.buildFromTemplate([
+    { label: strings.copy, role: 'copy', enabled: !!hasSelection },
+    { label: strings.selectAll, role: 'selectAll' },
+  ]).popup({ window: mainWindow });
+});
+
 // ---- Versión de la app (para el panel "Acerca de") ----
 ipcMain.handle('app:get-version', () => app.getVersion());
 
@@ -1793,7 +1906,7 @@ function tokenizeCommand(str) {
   return tokens;
 }
 
-ipcMain.handle('terminal:run', (_event, commandStr) => {
+ipcMain.handle('terminal:run', async (_event, commandStr) => {
   // Si ya había un comando corriendo (el usuario le dio "Ejecutar" de nuevo
   // sin esperar), lo cortamos antes de arrancar el nuevo.
   if (terminalProc) {
@@ -1825,10 +1938,25 @@ ipcMain.handle('terminal:run', (_event, commandStr) => {
     const downloadsPath = settings.downloadPath && settings.downloadPath.trim()
       ? settings.downloadPath.trim()
       : path.join(os.homedir(), 'Downloads');
-    const template = settings.outputTemplate && settings.outputTemplate.trim()
-      ? settings.outputTemplate.trim()
-      : '%(title)s.%(ext)s';
+    const template = resolveOutputTemplate(settings);
     tokens = ['-o', path.join(downloadsPath, template), ...tokens];
+  }
+
+  // Plugin de PO Token (ver getPotPluginDir). En el modo Terminal el usuario
+  // arma el comando a mano, así que solo lo agregamos si no puso el suyo.
+  // Modo manual: no sabemos si el video tiene restricción de edad, así que si
+  // el comando trae un enlace de YouTube se asegura el servidor de PO Token.
+  if (tokens.some((t) => isYoutubeUrl(t.replace(/^["']|["']$/g, '')))) {
+    await ensurePotServerRunning();
+  }
+
+  const terminalDeno = getDenoPath();
+  if (terminalDeno && !tokens.some((t) => t === '--js-runtimes' || /^--js-runtimes=/.test(t))) {
+    tokens = ['--js-runtimes', `deno:${terminalDeno}`, ...tokens];
+  }
+  const terminalPluginDir = getPotPluginDir();
+  if (terminalPluginDir && !tokens.some((t) => t === '--plugin-dirs' || /^--plugin-dirs=/.test(t))) {
+    tokens = ['--plugin-dirs', terminalPluginDir, ...tokens];
   }
 
   const ytdlpPath = getYtDlpPath();
@@ -1922,6 +2050,71 @@ ipcMain.on('language:set', (_event, lang) => refreshTrayLanguage(lang));
 // un archivo de audio propio.
 ipcMain.handle('app:play-notification-sound', () => {
   shell.beep();
+});
+
+// Notificación de escritorio al terminar la cola de descargas. Solo se muestra si la
+// ventana NO está en primer plano (si el usuario la está mirando, ya lo ve en pantalla).
+// Al hacer clic en la notificación se trae la ventana al frente.
+ipcMain.handle('app:notify', (_event, payload) => {
+  try {
+    if (!payload || typeof payload !== 'object') return false;
+    if (!Notification.isSupported()) return false;
+    const windowInFront =
+      mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible() && !mainWindow.isMinimized() && mainWindow.isFocused();
+    if (windowInFront) return false;
+    const notification = new Notification({
+      title: String(payload.title || '').slice(0, 120),
+      body: String(payload.body || '').slice(0, 300),
+      silent: true, // el sonido lo maneja la app (campanita), para que no suene doble
+    });
+    notification.on('click', () => {
+      if (!mainWindow || mainWindow.isDestroyed()) return;
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+    });
+    notification.show();
+    return true;
+  } catch (e) {
+    return false;
+  }
+});
+
+// Acción al terminar la cola: suspender o apagar el equipo. El renderer ya mostró una
+// cuenta regresiva cancelable antes de llamar a esto, así que aquí se ejecuta directo.
+ipcMain.handle('app:power-action', (_event, action) => {
+  if (action !== 'sleep' && action !== 'shutdown') return false;
+  const { spawn } = require('child_process');
+  let command;
+  let args;
+  if (process.platform === 'win32') {
+    if (action === 'shutdown') {
+      command = 'shutdown';
+      args = ['/s', '/t', '0'];
+    } else {
+      command = 'rundll32.exe';
+      args = ['powrprof.dll,SetSuspendState', '0', '1', '0'];
+    }
+  } else if (process.platform === 'darwin') {
+    if (action === 'shutdown') {
+      command = 'osascript';
+      args = ['-e', 'tell application "System Events" to shut down'];
+    } else {
+      command = 'pmset';
+      args = ['sleepnow'];
+    }
+  } else {
+    command = 'systemctl';
+    args = [action === 'shutdown' ? 'poweroff' : 'suspend'];
+  }
+  try {
+    const child = spawn(command, args, { detached: true, stdio: 'ignore', windowsHide: true });
+    child.on('error', () => {});
+    child.unref();
+    return true;
+  } catch (e) {
+    return false;
+  }
 });
 
 // ---- Diálogos nativos para elegir carpeta de descargas / archivo de cookies ----
@@ -2084,6 +2277,10 @@ ipcMain.handle('update:get-versions', async () => {
     ytdlpManaged: fs.existsSync(getManagedYtDlpPath(settings.ytdlpChannel)),
     ffmpegManaged: fs.existsSync(getManagedFfmpegPath()),
     denoVersion: (await getBinaryVersion(getDenoPath() || 'deno', ['--version'])) || 'No instalado',
+    // Versión INSTALADA del proveedor de PO Token (servidor pot-server + plugin
+    // yt-dlp-plugins, mismo repo y versión). null si todavía no está instalado
+    // (se instala solo la primera vez que hace falta, o desde Actualizaciones).
+    potProviderVersion: getInstalledPotVersion(),
     denoManaged: fs.existsSync(getManagedDenoPath()),
     // denoAvailable: true si yt-dlp va a poder usar un Deno real al llamarlo
     // (administrado O empaquetado dentro del .exe). Distinto de denoManaged
@@ -2147,6 +2344,35 @@ ipcMain.handle('update:deno', async () => {
   }
 });
 
+// Instala o actualiza el proveedor de PO Token (servidor + plugin) a la última
+// versión publicada en GitHub. Si algo falla, se restaura lo que había antes.
+ipcMain.handle('update:pot', async () => {
+  if (potInstallPromise) {
+    return { success: false, error: 'Ya hay una instalación del proveedor de PO Token en curso. Espera a que termine.' };
+  }
+  const run = (async () => {
+    potInstalling = true;
+    try {
+      const latest = await getLatestPotRelease();
+      if (!latest) throw new Error('No se pudo consultar la última versión en GitHub');
+      await installPotProvider(latest.tag, (progress) => {
+        sendToWindow('update:progress', { target: 'pot', ...progress });
+      });
+      return latest.version;
+    } finally {
+      potInstalling = false;
+      potInstallPromise = null;
+    }
+  })();
+  potInstallPromise = run;
+  try {
+    const version = await run;
+    return { success: true, version: getInstalledPotVersion() || version };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
 // ---- Historial: listar, eliminar una entrada, vaciar, abrir archivo/carpeta ----
 ipcMain.handle('history:list', () => loadHistory());
 
@@ -2156,6 +2382,58 @@ ipcMain.handle('history:delete', (_event, id) => {
 });
 
 ipcMain.handle('history:clear', () => saveHistoryToDisk([]));
+
+// Exporta una lista de entradas del historial a CSV o JSON (según la extensión elegida).
+// Devuelve la ruta guardada, o null si se canceló.
+ipcMain.handle('history:export', async (_event, entries) => {
+  if (!Array.isArray(entries) || entries.length === 0) return null;
+  const fields = ['date', 'status', 'title', 'url', 'site', 'label', 'path', 'error'];
+  const rows = entries.slice(0, 100000).map((e) => {
+    const row = {};
+    fields.forEach((f) => { row[f] = String((e && e[f]) || ''); });
+    return row;
+  });
+  const stamp = new Date().toISOString().slice(0, 10);
+  const result = await dialog.showSaveDialog(mainWindow, {
+    defaultPath: path.join(app.getPath('documents'), `historial-descargas-${stamp}.csv`),
+    filters: [
+      { name: 'CSV', extensions: ['csv'] },
+      { name: 'JSON', extensions: ['json'] },
+    ],
+  });
+  if (result.canceled || !result.filePath) return null;
+  let content;
+  if (/\.json$/i.test(result.filePath)) {
+    content = JSON.stringify(rows, null, 2);
+  } else {
+    // Celdas que empiezan con = + - @ se prefijan con ' para que Excel no las ejecute como fórmula.
+    const cell = (v) => {
+      const safe = /^[=+\-@\t\r]/.test(v) ? `'${v}` : v;
+      return `"${safe.replace(/"/g, '""')}"`;
+    };
+    content = '\ufeff' + [fields.join(','), ...rows.map((r) => fields.map((f) => cell(r[f])).join(','))].join('\r\n');
+  }
+  fs.writeFileSync(result.filePath, content, 'utf-8');
+  return result.filePath;
+});
+
+// El renderer anota un error cuando un reintento automático se descarta (ej. video privado):
+// ese intento se había hecho en silencio y de otro modo no quedaría rastro en el historial.
+ipcMain.handle('history:record-error', (_event, opts) => {
+  if (!opts || !opts.url) return false;
+  addHistoryEntry({
+    date: new Date().toISOString(),
+    status: 'error',
+    title: opts.title || opts.url,
+    url: opts.url,
+    site: opts.site || '',
+    label: opts.label || '',
+    error: String(opts.error || ''),
+    thumbnail: opts.thumbnail || null,
+    retry: buildRetryPayload(opts),
+  });
+  return true;
+});
 
 // Última carpeta de descarga configurada por el usuario en Ajustes (no la de
 // Windows por defecto, que puede no tener nada que ver si el usuario la
@@ -2217,7 +2495,28 @@ ipcMain.on('history:open-folder', (_event, filePath) => {
 });
 
 // ---- Lógica de descarga con yt-dlp ----
-ipcMain.handle('app:fetch-formats', async (_event, url) => {
+const FETCH_FORMATS_TIMEOUT_MS = 90 * 1000;
+
+// Consultas de formatos/playlist en curso, para poder cancelarlas desde el botón "Cancelar" de Inicio.
+const activeFetchProcs = new Set();
+let fetchGeneration = 0;
+
+function trackFetchProc(proc) {
+  activeFetchProcs.add(proc);
+  proc.on('close', () => activeFetchProcs.delete(proc));
+  proc.on('error', () => activeFetchProcs.delete(proc));
+}
+
+ipcMain.handle('app:cancel-fetch', () => {
+  fetchGeneration++;
+  for (const proc of Array.from(activeFetchProcs)) {
+    proc.__cancelled = true;
+    try { killProcessTree(proc); } catch (e) { /* ya terminó */ }
+  }
+  return true;
+});
+
+function fetchFormatsOnce(url) {
   const { spawn } = require('child_process');
   const ytdlpPath = getYtDlpPath();
   const settings = loadSettings();
@@ -2231,16 +2530,31 @@ ipcMain.handle('app:fetch-formats', async (_event, url) => {
     });
     let data = '';
     let err = '';
+    // Si yt-dlp no responde en este tiempo se corta, para que la app no se quede buscando para siempre.
+    trackFetchProc(proc);
+    let timedOut = false;
+    const timeoutTimer = setTimeout(() => {
+      timedOut = true;
+      try { killProcessTree(proc); } catch (e) { /* ya terminó */ }
+    }, FETCH_FORMATS_TIMEOUT_MS);
     proc.stdout.on('data', (chunk) => (data += chunk));
     proc.stderr.on('data', (chunk) => (err += chunk));
     proc.on('close', (code) => {
+      clearTimeout(timeoutTimer);
       cleanupTempCookieFiles(tempFiles);
+      if (proc.__cancelled) return reject(new Error('cancelled'));
+      if (timedOut) {
+        console.error('[yt-dlp fetch-formats] tiempo agotado. stderr:', err);
+        return reject(new Error('yt-dlp tardó demasiado en responder. Revisa tu conexión e inténtalo de nuevo.'));
+      }
       if (code !== 0) {
         // El error crudo de yt-dlp queda en la consola (aunque a la app le
         // mostremos un mensaje traducido/simplificado) para poder diagnosticar
         // casos que no matcheen ninguno de los patrones conocidos de abajo.
         console.error('[yt-dlp stderr - fetch-formats]', err);
-        return reject(new Error(extractErrorMessage(err, cookieContext)));
+        const failure = new Error(extractErrorMessage(err, cookieContext));
+        failure.rawStderr = err; // para detectar restricción de edad más arriba
+        return reject(failure);
       }
       try {
         const info = JSON.parse(data);
@@ -2250,12 +2564,40 @@ ipcMain.handle('app:fetch-formats', async (_event, url) => {
       }
     });
     proc.on('error', (spawnErr) => {
+      clearTimeout(timeoutTimer);
       cleanupTempCookieFiles(tempFiles);
       reject(spawnErr.code === 'ENOENT'
         ? new Error('No se encontró yt-dlp. Ve a Configuración → Actualizaciones para descargarlo.')
         : spawnErr);
     });
   });
+}
+
+ipcMain.handle('app:fetch-formats', async (_event, url) => {
+  // 1) Intento normal, sin servidor de PO Token.
+  let firstInfo = null;
+  let firstError = null;
+  const generation = fetchGeneration;
+  try {
+    firstInfo = await fetchFormatsOnce(url);
+  } catch (e) {
+    firstError = e;
+  }
+  if (generation !== fetchGeneration) throw new Error('cancelled'); // el usuario canceló mientras tanto
+
+  // 2) Solo YouTube con restricción de edad: se inicia el servidor y se
+  //    consulta de nuevo (así salen los formatos de alta calidad).
+  const ageRestricted = firstError
+    ? AGE_RESTRICTED_RE.test(firstError.rawStderr || firstError.message || '')
+    : isAgeRestrictedInfo(firstInfo);
+
+  if (isYoutubeUrl(url) && ageRestricted && (await ensurePotServerRunning())) {
+    if (generation !== fetchGeneration) throw new Error('cancelled');
+    return fetchFormatsOnce(url);
+  }
+
+  if (firstError) throw firstError;
+  return firstInfo;
 });
 
 // ---- Obtener la lista de videos de una playlist (sin traer formatos de cada uno, para que sea rápido) ----
@@ -2270,12 +2612,14 @@ ipcMain.handle('app:fetch-playlist', async (_event, url) => {
     const proc = spawn(ytdlpPath, ['-J', '--flat-playlist', '--no-warnings', ...cookieArgs, url], {
       env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1' },
     });
+    trackFetchProc(proc);
     let data = '';
     let err = '';
     proc.stdout.on('data', (chunk) => (data += chunk));
     proc.stderr.on('data', (chunk) => (err += chunk));
     proc.on('close', (code) => {
       cleanupTempCookieFiles(tempFiles);
+      if (proc.__cancelled) return reject(new Error('cancelled'));
       if (code !== 0) {
         console.error('[yt-dlp stderr - fetch-playlist]', err);
         return reject(new Error(extractErrorMessage(err, cookieContext)));
@@ -2310,11 +2654,18 @@ ipcMain.handle('app:fetch-playlist', async (_event, url) => {
 // solo adentro del handler IPC) para que resumeDownloadById pueda invocarla de
 // nuevo con las mismas opciones cuando la extensión pide reanudar una
 // descarga pausada, sin pasar por el renderer.
-async function performDownload({ url, formatId, audioOnly, audioFormat, audioBitrateKbps, mergeFormat, presetOptions, title, site, label, videoInfo, thumbnail, outputDir, subfolder, downloadId, trimSection, extId }) {
+async function performDownload({ url, formatId, audioOnly, audioFormat, audioBitrateKbps, mergeFormat, presetOptions, title, site, label, videoInfo, thumbnail, outputDir, subfolder, downloadId, trimSection, extId, resume, silentError }) {
   // Reporta progreso/estado de esta descarga a extensionDownloads (si vino
   // de la extensión, es decir si trae extId) además de a la ventana
   // principal como siempre. No hace nada si extId es null/undefined.
   const reportExt = (patch) => { if (extId) setExtensionDownload(extId, patch); };
+  // Videos de YouTube con restricción de edad: asegurar el servidor de PO Token
+  // antes de lanzar yt-dlp. Si no tenemos los metadatos (descargas de playlist
+  // o de la extensión), no se inicia; en ese caso sirve el que ya haya arrancado
+  // al consultar el video en la app.
+  if (isYoutubeUrl(url) && isAgeRestrictedInfo(videoInfo)) {
+    await ensurePotServerRunning();
+  }
   // Miniatura a guardar en el historial: la que venga explícita en el payload
   // (ej. entradas de playlist) o, si no, la que traiga videoInfo.
   const historyThumbnail = thumbnail || (videoInfo && videoInfo.thumbnail) || null;
@@ -2357,15 +2708,21 @@ async function performDownload({ url, formatId, audioOnly, audioFormat, audioBit
   if (subfolder && subfolder.trim()) {
     downloadsPath = path.join(downloadsPath, sanitizeFolderName(subfolder.trim()));
   }
-  const template = settings.outputTemplate && settings.outputTemplate.trim()
-    ? settings.outputTemplate.trim()
-    : '%(title)s.%(ext)s';
+  const template = resolveOutputTemplate(settings);
   const outputTemplate = path.join(downloadsPath, template);
 
   const ffmpegArgs = ffmpegPath ? ['--ffmpeg-location', ffmpegPath] : [];
   // --force-overwrites evita el error de Windows "no se puede crear un archivo
   // que ya existe" cuando se reintenta una descarga que ya se hizo antes.
-  const overwriteArgs = ['--force-overwrites'];
+  //
+  // PERO yt-dlp documenta que --force-overwrites "incluye --no-continue":
+  // borra el archivo .part y empieza de cero. Por eso, al pausar y reanudar,
+  // la descarga volvía a empezar desde 0% aunque el .part siguiera en disco.
+  // En una REANUDACIÓN (resume=true, ver resumeActiveDownload en renderer.js y
+  // runExtensionResumeDirect más abajo) se usa en su lugar --continue +
+  // --no-force-overwrites, que retoma el .part donde quedó. Las descargas
+  // nuevas siguen usando --force-overwrites como siempre.
+  const overwriteArgs = resume ? ['--no-force-overwrites', '--continue'] : ['--force-overwrites'];
   // Cookies (navegador/archivo/login) y límite de velocidad, según Configuración de Descarga.
   // Las cookies se eligen automáticamente según el sitio detectado en el link.
   // liveConcurrency: cuántas descargas (de cualquier tipo: playlist o suelta)
@@ -2379,7 +2736,7 @@ async function performDownload({ url, formatId, audioOnly, audioFormat, audioBit
   const cookieContext = getCookieContextForUrl(settings, url);
   // Contenedor de salida elegido en la IU (columna "Formato"). Whitelist para
   // no pasarle a yt-dlp/ffmpeg un valor arbitrario; si no viene o no es válido, mp4 por defecto.
-  const ALLOWED_CONTAINERS = ['mp4', 'mkv', 'webm', 'mov'];
+  const ALLOWED_CONTAINERS = ['mp4', 'mkv', 'webm'];
   const outputContainer = ALLOWED_CONTAINERS.includes(mergeFormat) ? mergeFormat : 'mp4';
   // Subtítulos/miniatura/capítulos según Configuración → Descargas (webm no soporta
   // carátula incrustada de forma confiable, así que buildMediaExtrasArgs la omite ahí).
@@ -2404,16 +2761,15 @@ async function performDownload({ url, formatId, audioOnly, audioFormat, audioBit
     args = [...presetArgs, ...trimArgs, ...ffmpegArgs, ...overwriteArgs, ...settingsArgs, '-o', outputTemplate, url];
   } else if (audioOnly) {
     // Solo audio: fuerza la mejor pista de audio disponible y extrae al formato elegido
-    // (mp3 por defecto, o el que haya elegido el usuario en la lista de formatos: m4a, opus, flac, wav...)
-    const finalAudioFormat = audioFormat || 'mp3';
+    // (mp3 por defecto, o el que haya elegido el usuario en la lista de formatos: m4a, opus, flac...)
+    const finalAudioFormat = ['mp3', 'm4a', 'opus'].includes(audioFormat) ? audioFormat : 'mp3';
     // Nivel de calidad elegido en la IU (Alta/Media/Baja -> bitrate objetivo en kbps).
     // Si no viene ninguno (ej. preajuste "Mejor audio disponible"), se usa la
     // mejor calidad posible ("0" = VBR más alta que soporte ffmpeg).
     const audioQualityArg = Number.isFinite(audioBitrateKbps) && audioBitrateKbps > 0
       ? `${audioBitrateKbps}K`
       : '0';
-    // Subtítulos/miniatura/capítulos según Configuración → Descargas (WAV es sin
-    // pérdida y no soporta portada incrustada de forma fiable, así que se omite ahí).
+    // Subtítulos/miniatura/capítulos según Configuración → Descargas.
     const mediaExtrasArgs = buildMediaExtrasArgs(settings, { audioOnly: true, container: finalAudioFormat, isTrimmed: trimArgs.length > 0 });
     args = [
       '-f',
@@ -2650,19 +3006,25 @@ async function performDownload({ url, formatId, audioOnly, audioFormat, audioBit
       if (code !== 0) {
         console.error('[yt-dlp stderr - download]', err);
         const errorMessage = extractErrorMessage(err, cookieContext);
-        addHistoryEntry({
-          date: new Date().toISOString(),
-          status: 'error',
-          title: title || url,
-          url,
-          site: site || '',
-          label: label || '',
-          error: errorMessage,
-          thumbnail: historyThumbnail,
-          videoId: historyVideoId,
-          extractorKey: historyExtractorKey,
-        });
-        reportExt({ status: 'error', error: errorMessage });
+        // silentError: el renderer va a reintentar solo; este intento fallido no se anota
+        // en el historial ni se reporta a la extensión (solo el intento final).
+        if (!silentError) {
+          addHistoryEntry({
+            date: new Date().toISOString(),
+            status: 'error',
+            title: title || url,
+            url,
+            site: site || '',
+            label: label || '',
+            error: errorMessage,
+            thumbnail: historyThumbnail,
+            videoId: historyVideoId,
+            extractorKey: historyExtractorKey,
+            // Con esto la pestaña "Error" puede reintentar con la misma calidad y carpeta.
+            retry: buildRetryPayload({ url, formatId, audioOnly, audioFormat, audioBitrateKbps, mergeFormat, presetOptions, title, site, label, thumbnail, outputDir, subfolder, trimSection }),
+          });
+          reportExt({ status: 'error', error: errorMessage });
+        }
         return reject(new Error(errorMessage));
       }
 
@@ -2730,33 +3092,88 @@ function pauseDownloadById(id) {
   return true;
 }
 
-// Reanudar una descarga pausada desde la extensión: vuelve a invocar
-// performDownload con las mismas opciones que se usaron la primera vez
-// (guardadas en extensionDownloadOpts, ver ipcMain.handle('app:download')).
-// yt-dlp retoma el archivo .part solo (no se usa --no-continue), así que
-// alcanza con relanzar el proceso — no hace falta tocar argumentos.
-// Solo aplica a descargas que vinieron de la extensión (por HTTP, vía id);
-// las que arrancan desde la propia ventana ya se reanudan por su cuenta
-// (ver resumeActiveDownload en renderer.js, que vuelve a llamar a
-// window.yoinksAPI.download con el payload que guarda del lado del renderer).
-function resumeDownloadById(id) {
+// Reanudar una descarga pausada desde la extensión.
+//
+// IMPORTANTE: la reanudación se delega al renderer (la ventana) y NO se
+// relanza yt-dlp directamente desde acá. Antes se llamaba a performDownload()
+// sin más, y eso dejaba a la ventana desincronizada: su fila seguía en
+// "pausado" (aunque llegaran eventos de progreso, que solo mueven la barra),
+// y cuando la descarga terminaba nadie recibía el resultado, así que la fila
+// se quedaba "pausada" para siempre; si el usuario tocaba "Reanudar" en la app
+// se lanzaba una segunda descarga. Pasando por resumeActiveDownload() del
+// renderer, la fila, los botones, el historial y el resultado final se manejan
+// igual que cuando se reanuda desde el botón de la propia app.
+//
+// Si la ventana no está disponible, no tiene registrada esa descarga (ack con
+// handled=false) o no contesta en RESUME_ACK_TIMEOUT_MS, se usa como respaldo
+// el relanzado directo de antes (yt-dlp retoma el archivo .part solo, porque
+// no se usa --no-continue).
+const pendingExtensionResumes = new Map(); // extId -> timer del respaldo
+const RESUME_ACK_TIMEOUT_MS = 3000;
+
+function runExtensionResumeDirect(id) {
   const opts = extensionDownloadOpts.get(id);
-  if (!opts) return false;
-  setExtensionDownload(id, { status: 'starting' });
-  performDownload(opts).catch(() => {
+  if (!opts || activeProcs.has(id)) return;
+  performDownload({ ...opts, resume: true }).catch(() => {
     // Si falla al relanzar, processStdoutLine/proc.on('error') dentro de
     // performDownload ya deja reflejado el estado 'error' vía reportExt;
     // acá no hace falta hacer nada más.
   });
+}
+
+function resumeDownloadById(id) {
+  const opts = extensionDownloadOpts.get(id);
+  if (!opts) return false;
+  // Ya está corriendo o ya hay un pedido de reanudar en camino (doble click,
+  // reintento de la extensión): no se lanza un segundo yt-dlp.
+  if (activeProcs.has(id) || pendingExtensionResumes.has(id)) return true;
+  setExtensionDownload(id, { status: 'starting' });
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    const timer = setTimeout(() => {
+      pendingExtensionResumes.delete(id);
+      runExtensionResumeDirect(id);
+    }, RESUME_ACK_TIMEOUT_MS);
+    pendingExtensionResumes.set(id, timer);
+    sendToWindow('app:resume-extension-download', id);
+  } else {
+    runExtensionResumeDirect(id);
+  }
   return true;
 }
+
+// Respuesta del renderer al pedido de arriba: handled=true si encontró esa
+// descarga en su panel (y se encarga de reanudarla); false si no, y entonces
+// se usa el respaldo directo.
+ipcMain.on('app:resume-extension-download-ack', (_event, extId, handled) => {
+  const timer = pendingExtensionResumes.get(extId);
+  if (!timer) return; // ya se activó el respaldo por timeout
+  clearTimeout(timer);
+  pendingExtensionResumes.delete(extId);
+  if (!handled) runExtensionResumeDirect(extId);
+});
 
 // Cancelar una descarga en curso: mata el proceso; el archivo .part parcial
 // puede quedar en el disco (yt-dlp no lo borra al recibir la señal). Mismo
 // doble uso (IPC + HTTP) que pauseDownloadById.
 function cancelDownloadById(id) {
   const proc = activeProcs.get(id);
-  if (!proc) return false;
+  if (!proc) {
+    // Descarga de la extensión que está PAUSADA: al pausar se mató el proceso
+    // de yt-dlp, así que no hay nada que matar y antes esto devolvía false
+    // (la extensión mostraba "No se pudo cancelar" y la descarga no se podía
+    // cancelar estando en pausa). Se resuelve igual que el botón "Cancelar" de
+    // la propia app para una fila pausada: se le avisa a la ventana para que
+    // la quite de su panel, y se marca "cancelled" para la extensión. Se
+    // olvidan las opciones guardadas para que ya no se pueda reanudar.
+    const ext = typeof id === 'string' ? getExtensionDownload(id) : null;
+    if (ext && ext.status === 'paused') {
+      setExtensionDownload(id, { status: 'cancelled' });
+      extensionDownloadOpts.delete(id);
+      sendToWindow('app:cancel-extension-download', id);
+      return true;
+    }
+    return false;
+  }
   if (proc.__markCanceled) proc.__markCanceled();
   killProcessTree(proc);
   return true;
@@ -2863,7 +3280,7 @@ function getCookieContextForUrl(settings, url) {
     if (!fs.existsSync(siteConfig.file)) return { active: false, mode: 'none', siteLabel };
     return { active: true, mode: 'file', siteLabel, filePath: siteConfig.file };
   }
-  if (siteConfig.mode === 'applogin' && site !== 'other') {
+  if (siteConfig.mode === 'applogin' && site !== 'other' && site !== 'youtube') {
     const cookieFile = getLoginCookiesFile(site);
     if (fs.existsSync(cookieFile)) {
       return { active: true, mode: 'applogin', siteLabel };
@@ -2915,6 +3332,7 @@ function extractErrorMessage(stderrText, cookieContext) {
   // yt-dlp ya sugiere usar cookies, pero con un mensaje técnico en inglés;
   // lo reemplazamos por uno claro que apunte a la configuración de la app.
   if (/sign in|confirm your age|age-restricted|age restricted|private video|members-only|inappropriate for some users/i.test(message)) {
+    const isYouTubeCtx = !!(cookieContext && cookieContext.siteLabel === 'YouTube');
     if (cookieContext && cookieContext.active) {
       // Ya había cookies configuradas para este sitio y AUN ASÍ pidió iniciar
       // sesión: el problema no es que falten cookies, sino que las que hay no
@@ -2931,14 +3349,19 @@ function extractErrorMessage(stderrText, cookieContext) {
         `ya tiene ${modeLabel} configuradas, yt-dlp igual no pudo usarlas. Motivos frecuentes: ` +
         '1) la cuenta usada no tiene la edad verificada en Google/YouTube, ' +
         '2) el archivo cookies.txt se exportó sin haber iniciado sesión (o desde una pestaña de incógnito), ' +
-        '3) la sesión venció y hay que volver a exportar el archivo o volver a "Iniciar sesión con cuenta". ' +
-        'Probá reexportar el cookies.txt recién después de entrar a youtube.com con la cuenta, o usá "Iniciar sesión con cuenta" en vez de archivo (Configuración → Descarga).'
+        (isYouTubeCtx
+          ? '3) la sesión venció y hay que volver a exportar el archivo o usar las cookies del navegador. ' +
+            'Probá reexportar el cookies.txt recién después de entrar a youtube.com con la cuenta, o usá "Desde navegador" en vez de archivo (Configuración → Cookies).'
+          : '3) la sesión venció y hay que volver a exportar el archivo o volver a "Iniciar sesión con cuenta". ' +
+            'Probá reexportar el cookies.txt recién después de entrar a youtube.com con la cuenta, o usá "Iniciar sesión con cuenta" en vez de archivo (Configuración → Descarga).')
       );
     }
     return (
       `Este video requiere iniciar sesión (verificación de edad, video privado o solo para miembros). ` +
       `Ve a Configuración → Descarga y activá las cookies de ${cookieContext ? cookieContext.siteLabel : 'ese sitio'} ` +
-      '("Desde archivo", "Desde navegador" o "Iniciar sesión con cuenta") con una cuenta que tenga acceso.'
+      (isYouTubeCtx
+        ? '("Desde archivo" o "Desde navegador") con una cuenta que tenga acceso.'
+        : '("Desde archivo", "Desde navegador" o "Iniciar sesión con cuenta") con una cuenta que tenga acceso.')
     );
   }
 
@@ -3120,6 +3543,401 @@ function getDenoPath() {
   return null;
 }
 
+// ================= PROVEEDOR DE PO TOKEN (bgutil, versión oficial) =================
+//
+// Dos piezas, ambas preparadas con "npm run prepare:pot" (ver README.txt):
+//   1) pot-server/  -> servidor oficial (TypeScript) que genera los PO Tokens.
+//      La app lo ejecuta con el MISMO deno.exe que ya usa yt-dlp, en
+//      127.0.0.1:4416. No hace falta Docker ni Node.
+//   2) yt-dlp-plugins/bgutil-ytdlp-pot-provider.zip -> plugin de yt-dlp que le
+//      pide los tokens a ese servidor. yt-dlp lo carga con --plugin-dirs.
+// Si falta cualquiera de las dos, o no hay Deno, la app funciona igual que antes.
+
+const POT_SERVER_PORT = 4416;
+let potServerProc = null;
+
+const POT_PLUGIN_ZIP = 'bgutil-ytdlp-pot-provider.zip';
+
+function getPotPluginDir() {
+  const candidates = [
+    path.join(getManagedBinDir(), 'yt-dlp-plugins'),
+    path.join(process.resourcesPath || __dirname, 'bin', 'yt-dlp-plugins'),
+  ];
+  for (const dir of candidates) {
+    if (fs.existsSync(path.join(dir, POT_PLUGIN_ZIP))) return dir;
+  }
+  return null;
+}
+
+// Carpeta del servidor: la administrada (userData/bin/pot-server) tiene
+// prioridad sobre la empaquetada (resources/bin/pot-server). Solo se considera
+// válida si tiene el código y las dependencias ya instaladas.
+function getPotServerDir() {
+  const candidates = [
+    path.join(getManagedBinDir(), 'pot-server'),
+    path.join(process.resourcesPath || __dirname, 'bin', 'pot-server'),
+  ];
+  for (const dir of candidates) {
+    if (
+      fs.existsSync(path.join(dir, 'src', 'main.ts')) &&
+      fs.existsSync(path.join(dir, 'node_modules')) &&
+      fs.existsSync(path.join(dir, 'VERSION')) // se escribe al terminar la instalación
+    ) {
+      return dir;
+    }
+  }
+  return null;
+}
+
+// Archivo con el servidor ya instalado que viaja dentro del instalador
+// (assets/bin/pot-server.tar.gz -> resources/bin/pot-server.tar.gz).
+function getBundledPotArchive() {
+  const file = path.join(process.resourcesPath || __dirname, 'bin', 'pot-server.tar.gz');
+  return fs.existsSync(file) ? file : null;
+}
+
+// true si ya hay un servidor de PO Token respondiendo en el puerto (por
+// ejemplo un contenedor de Docker): en ese caso lo reutilizamos y no
+// arrancamos otro, que chocaría con el mismo puerto.
+function isPotServerUp() {
+  return new Promise((resolve) => {
+    const http = require('http');
+    const req = http.get(
+      { host: '127.0.0.1', port: POT_SERVER_PORT, path: '/ping', timeout: 1500 },
+      (res) => {
+        res.resume();
+        resolve(res.statusCode === 200);
+      }
+    );
+    req.on('timeout', () => {
+      req.destroy();
+      resolve(false);
+    });
+    req.on('error', () => resolve(false));
+  });
+}
+
+// ---- Instalación automática (primer arranque) ----
+//
+// Si la app no trae el servidor empaquetado (o es una instalación limpia, sin
+// nada en userData/bin), lo instala sola en userData/bin: descarga Deno si
+// falta (updateDeno), baja el código oficial del servidor, instala sus
+// dependencias con Deno y descarga el plugin de yt-dlp de la MISMA versión.
+// Se hace una vez; después solo se usa lo ya instalado.
+const POT_PROVIDER_VERSION = '2.0.2';
+const POT_PROVIDER_REPO = 'Brainicism/bgutil-ytdlp-pot-provider';
+let potInstallPromise = null;
+let potInstalling = false;
+
+async function ensurePotServer() {
+  if (getPotServerDir() && getPotPluginDir()) return; // ya está (empaquetado o instalado)
+  if (potInstallPromise) return potInstallPromise;
+
+  potInstallPromise = (async () => {
+    potInstalling = true;
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pot-install-'));
+    try {
+      ensureManagedBinDir();
+      if (!getDenoPath()) {
+        console.log('[pot] Instalando Deno (necesario para el servidor de PO Token)...');
+        await updateDeno(() => {});
+      }
+      const deno = getDenoPath();
+      if (!deno) throw new Error('Deno no está disponible');
+
+      const binDir = getManagedBinDir();
+
+      if (!getPotServerDir()) {
+        // 1) Lo normal: el instalador trae pot-server.tar.gz (ver
+        //    scripts/prepare-pot-server.js). Se extrae sin usar internet.
+        const archive = getBundledPotArchive();
+        if (archive) {
+          try {
+            console.log('[pot] Extrayendo el servidor de PO Token incluido en la app...');
+            fs.rmSync(path.join(binDir, 'pot-server'), { recursive: true, force: true });
+            await runCommand('tar', ['-xzf', archive, '-C', binDir]);
+          } catch (e) {
+            console.error('[pot] No se pudo extraer el servidor incluido:', e.message);
+          }
+        }
+      }
+
+      if (!getPotServerDir()) {
+        // 2) Respaldo: la app no lo trae (o falló la extracción): se descarga
+        //    el código oficial y se instalan las dependencias con Deno.
+        await installPotProvider(POT_PROVIDER_VERSION);
+      }
+
+      if (!getPotPluginDir()) {
+        console.log('[pot] Descargando el plugin de yt-dlp...');
+        const pluginsDir = path.join(binDir, 'yt-dlp-plugins');
+        fs.mkdirSync(pluginsDir, { recursive: true });
+        await downloadFileFollowRedirects(
+          `https://github.com/${POT_PROVIDER_REPO}/releases/download/${getInstalledPotVersion() || POT_PROVIDER_VERSION}/${POT_PLUGIN_ZIP}`,
+          path.join(pluginsDir, POT_PLUGIN_ZIP)
+        );
+      }
+      console.log('[pot] Servidor de PO Token instalado.');
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+      potInstalling = false;
+      potInstallPromise = null;
+    }
+  })();
+  return potInstallPromise;
+}
+
+// Versión instalada del proveedor: el archivo VERSION del servidor (se escribe
+// al terminar la instalación, junto con el plugin). null si no hay servidor.
+function getInstalledPotVersion() {
+  const dir = getPotServerDir();
+  if (!dir) return null;
+  try {
+    return fs.readFileSync(path.join(dir, 'VERSION'), 'utf8').trim() || null;
+  } catch (e) {
+    return null;
+  }
+}
+
+// Último release publicado del proveedor en GitHub. "tag" se usa tal cual en
+// las URLs de descarga; "version" es el mismo número sin una "v" inicial.
+async function getLatestPotRelease() {
+  const release = await fetchJson(`https://api.github.com/repos/${POT_PROVIDER_REPO}/releases/latest`);
+  const tag = release && release.tag_name ? String(release.tag_name).trim() : '';
+  if (!/^v?\d+(\.\d+){1,3}$/.test(tag)) return null;
+  return { tag, version: tag.replace(/^v/, '') };
+}
+
+// Instala (o reemplaza) el servidor de PO Token y su plugin de yt-dlp de la
+// MISMA versión en la carpeta administrada. Primero descarga todo; solo
+// después toca lo instalado, y si algo falla restaura la copia anterior.
+async function installPotProvider(tag, onProgress) {
+  const report = (percent) => {
+    try { if (onProgress) onProgress({ percent }); } catch (e) { /* no crítico */ }
+  };
+  const version = String(tag).replace(/^v/, '');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pot-install-'));
+  const binDir = getManagedBinDir();
+  const serverDir = path.join(binDir, 'pot-server');
+  const backupDir = path.join(binDir, 'pot-server.old');
+  const pluginsDir = path.join(binDir, 'yt-dlp-plugins');
+  const pluginPath = path.join(pluginsDir, POT_PLUGIN_ZIP);
+  const pluginBackup = path.join(tmp, 'plugin-anterior.zip');
+  let hadOldServer = false;
+  let hadOldPlugin = false;
+  let swapStarted = false;
+
+  try {
+    ensureManagedBinDir();
+    report(0);
+    if (!getDenoPath()) {
+      console.log('[pot] Instalando Deno (necesario para el servidor de PO Token)...');
+      await updateDeno((p) => report((p.percent || 0) * 0.15));
+    }
+    const deno = getDenoPath();
+    if (!deno) throw new Error('Deno no está disponible');
+
+    // 1) Descargar el código del servidor y el plugin (todavía no se toca nada)
+    console.log('[pot] Descargando el servidor de PO Token', version, '...');
+    report(15);
+    const tgz = path.join(tmp, 'src.tar.gz');
+    await downloadFileFollowRedirects(
+      `https://codeload.github.com/${POT_PROVIDER_REPO}/tar.gz/refs/tags/${tag}`,
+      tgz,
+      (p) => report(15 + (p.percent || 0) * 0.15)
+    );
+    await runCommand('tar', ['-xzf', tgz, '-C', tmp]);
+    const extracted = fs.readdirSync(tmp).find((n) => n.startsWith('bgutil-ytdlp-pot-provider-'));
+    if (!extracted) throw new Error('No se encontró el código fuente extraído');
+    const srcServer = path.join(tmp, extracted, 'server');
+    if (!fs.existsSync(path.join(srcServer, 'src', 'main.ts'))) {
+      throw new Error('El código descargado no tiene server/src/main.ts');
+    }
+
+    console.log('[pot] Descargando el plugin de yt-dlp...');
+    const newPlugin = path.join(tmp, POT_PLUGIN_ZIP);
+    await downloadFileFollowRedirects(
+      `https://github.com/${POT_PROVIDER_REPO}/releases/download/${tag}/${POT_PLUGIN_ZIP}`,
+      newPlugin,
+      (p) => report(30 + (p.percent || 0) * 0.05)
+    );
+    report(35);
+
+    // 2) Parar el servidor si está corriendo (si no, Windows bloquea los archivos)
+    stopPotServer();
+    await new Promise((resolve) => setTimeout(resolve, 800));
+
+    // 3) Guardar lo anterior y dejar el servidor nuevo en su ubicación final
+    //    (Deno crea enlaces dentro de node_modules que no sobreviven a mover la
+    //    carpeta, por eso se instala directamente donde va a vivir).
+    swapStarted = true;
+    fs.rmSync(backupDir, { recursive: true, force: true });
+    if (fs.existsSync(serverDir)) {
+      try {
+        fs.renameSync(serverDir, backupDir);
+      } catch (e) {
+        throw new Error('No se pudo reemplazar el servidor anterior (¿está en uso?). Cierra la app y vuelve a intentarlo.');
+      }
+      hadOldServer = true;
+    }
+    if (fs.existsSync(pluginPath)) {
+      fs.copyFileSync(pluginPath, pluginBackup);
+      hadOldPlugin = true;
+    }
+
+    fs.mkdirSync(serverDir, { recursive: true });
+    for (const f of ['package.json', 'deno.json', 'deno.lock']) {
+      if (fs.existsSync(path.join(srcServer, f))) {
+        fs.copyFileSync(path.join(srcServer, f), path.join(serverDir, f));
+      }
+    }
+    fs.cpSync(path.join(srcServer, 'src'), path.join(serverDir, 'src'), { recursive: true });
+    const pkgPath = path.join(serverDir, 'package.json');
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+    delete pkg.devDependencies; // ahorra ~130 MB
+    fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2));
+
+    report(40);
+    await runCommand(deno, ['install', '--allow-scripts=npm:canvas'], { cwd: serverDir });
+    report(90);
+
+    // 4) Plugin nuevo y, al final, la marca VERSION (instalación completa)
+    fs.mkdirSync(pluginsDir, { recursive: true });
+    fs.copyFileSync(newPlugin, pluginPath);
+    fs.writeFileSync(path.join(serverDir, 'VERSION'), version + '\n');
+
+    fs.rmSync(backupDir, { recursive: true, force: true });
+    report(100);
+    console.log('[pot] Servidor de PO Token', version, 'instalado.');
+  } catch (e) {
+    // Restaurar lo que había antes para no dejar la función rota
+    if (swapStarted) {
+      try {
+        fs.rmSync(serverDir, { recursive: true, force: true });
+        if (hadOldServer) fs.renameSync(backupDir, serverDir);
+        if (hadOldPlugin) fs.copyFileSync(pluginBackup, pluginPath);
+      } catch (restoreErr) {
+        console.error('[pot] No se pudo restaurar la versión anterior:', restoreErr.message);
+      }
+    }
+    throw e;
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
+async function startPotServer() {
+  if (potServerProc) return;
+
+  const serverDir = getPotServerDir();
+  const denoPath = getDenoPath();
+  if (!serverDir || !denoPath) return; // sin servidor empaquetado o sin Deno: seguimos sin PO Token automático
+
+  if (await isPotServerUp()) return;
+  if (potServerProc) return; // por si se llamó dos veces mientras esperábamos el ping
+
+  const { spawn } = require('child_process');
+  try {
+    // Mismos permisos y carpeta de trabajo que indica el README oficial para
+    // correrlo con Deno: cwd = node_modules, entrada = ../src/main.ts
+    potServerProc = spawn(
+      denoPath,
+      [
+        'run',
+        '--allow-env',
+        '--allow-net',
+        '--allow-ffi=.',
+        '--allow-read=.',
+        '../src/main.ts',
+        '--port',
+        String(POT_SERVER_PORT),
+      ],
+      {
+        cwd: path.join(serverDir, 'node_modules'),
+        windowsHide: true,
+        stdio: ['ignore', 'ignore', 'pipe'],
+      }
+    );
+  } catch (e) {
+    console.error('[pot] No se pudo iniciar el servidor de PO Token:', e.message);
+    potServerProc = null;
+    return;
+  }
+
+  const proc = potServerProc;
+  proc.stderr.on('data', (chunk) => console.error('[pot]', chunk.toString().trim()));
+  proc.on('error', (e) => {
+    console.error('[pot] Error en el servidor de PO Token:', e.message);
+    if (potServerProc === proc) potServerProc = null;
+  });
+  proc.on('exit', (code) => {
+    if (code) console.error('[pot] El servidor de PO Token terminó con código', code);
+    if (potServerProc === proc) {
+      potServerProc = null;
+      potServerAvailable = false;
+    }
+  });
+}
+
+// ---- Arranque bajo demanda ----
+//
+// El servidor NO corre siempre: solo se inicia cuando hace falta, es decir,
+// con videos de YouTube que tienen restricción de edad (los demás se
+// descargan bien sin PO Token). Una vez iniciado se queda corriendo hasta
+// cerrar la app, así las siguientes consultas/descargas lo aprovechan.
+
+const YOUTUBE_URL_RE = /^(?:https?:\/\/)?(?:[\w-]+\.)*(?:youtube\.com|youtu\.be|youtube-nocookie\.com)(?:[/:?#]|$)/i;
+const AGE_RESTRICTED_RE = /age-restricted|confirm your age|age[- ]verification/i;
+
+function isYoutubeUrl(url) {
+  return typeof url === 'string' && YOUTUBE_URL_RE.test(url.trim());
+}
+
+// Metadatos de yt-dlp (-J): age_limit >= 18 indica restricción de edad.
+function isAgeRestrictedInfo(info) {
+  return !!info && Number(info.age_limit) >= 18;
+}
+
+// Instala (si falta), arranca y espera (máx. 30 s) a que el servidor responda.
+// Devuelve true si quedó funcionando. Nunca lanza: si algo falla, devuelve
+// false y quien llama sigue con el error original.
+// true cuando el servidor respondió: a partir de ahí yt-dlp carga el plugin (ver buildSettingsArgs).
+let potServerAvailable = false;
+
+async function ensurePotServerRunning(maxMs = 30000) {
+  try {
+    if (await isPotServerUp()) { // ya corre (esta app, Docker, etc.)
+      potServerAvailable = true;
+      return true;
+    }
+    await ensurePotServer();                // instala/extrae si todavía no está
+    if (!getPotServerDir() || !getDenoPath()) return false;
+    await startPotServer();
+
+    const deadline = Date.now() + maxMs;
+    while (Date.now() < deadline) {
+      if (await isPotServerUp()) {
+        potServerAvailable = true;
+        return true;
+      }
+      if (!potServerProc) break; // el proceso murió: no tiene sentido esperar
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    potServerAvailable = await isPotServerUp();
+    return potServerAvailable;
+  } catch (e) {
+    console.error('[pot] No se pudo preparar el servidor de PO Token:', e.message);
+    return false;
+  }
+}
+
+function stopPotServer() {
+  potServerAvailable = false;
+  if (!potServerProc) return;
+  try { killProcessTree(potServerProc); } catch (e) { /* ya cerrado */ }
+  potServerProc = null;
+}
+
 // Pide un JSON por HTTPS (ej. la API de GitHub), siguiendo redirecciones.
 function fetchJson(url, redirectCount = 0) {
   return new Promise((resolve, reject) => {
@@ -3219,6 +4037,9 @@ ipcMain.handle('update:check', async () => {
     denoUpdateAvailable: false,
     denoLatestVersion: null,
     denoChecked: false,
+    potUpdateAvailable: false,
+    potLatestVersion: null,
+    potChecked: false,
   };
 
   // yt-dlp: compara el binario instalado contra el último release de GitHub
@@ -3296,6 +4117,25 @@ ipcMain.handle('update:check', async () => {
     }
   }
 
+  // Proveedor de PO Token (servidor + plugin de bgutil): solo se revisa si ya
+  // está instalado. Se compara la versión instalada (archivo VERSION) contra el
+  // último release del repo en GitHub.
+  const potInstalledVersion = getInstalledPotVersion();
+  if (potInstalledVersion) {
+    try {
+      const latest = await getLatestPotRelease();
+      if (latest) {
+        result.potChecked = true;
+        if (latest.version !== potInstalledVersion) {
+          result.potUpdateAvailable = true;
+          result.potLatestVersion = latest.version;
+        }
+      }
+    } catch (e) {
+      // sin conexión o la API no respondió: se ignora
+    }
+  }
+
   return result;
 });
 
@@ -3339,10 +4179,10 @@ function downloadFileFollowRedirects(url, destPath, onProgress, redirectCount = 
 }
 
 // Ejecuta un comando externo (powershell/unzip/tar) y resuelve cuando termina con éxito.
-function runCommand(cmd, args) {
+function runCommand(cmd, args, options = {}) {
   const { spawn } = require('child_process');
   return new Promise((resolve, reject) => {
-    const proc = spawn(cmd, args, { windowsHide: true });
+    const proc = spawn(cmd, args, { windowsHide: true, ...options });
     let err = '';
     proc.stderr.on('data', (chunk) => (err += chunk));
     proc.on('close', (code) => {

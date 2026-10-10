@@ -9,13 +9,88 @@
   if (window.__ytdlpMinimalistOverlayInjected) return;
   window.__ytdlpMinimalistOverlayInjected = true;
 
-  // Mismas opciones que el <select> del popup — ver parseQualityValue en
-  // url-utils.js para cómo se traduce cada value a lo que espera la app.
-  // Las etiquetas se traducen en el momento (ver getQualityOptions) según
-  // el idioma elegido en los ajustes de la extensión (ver i18n.js).
-  function getQualityOptions(lang) {
-    return QUALITY_OPTION_DEFS.map((def) => ({ value: def.value, label: t(def.key, lang) }));
+  // Si la extensión se recarga, se actualiza o se desactiva mientras esta pestaña sigue abierta,
+  // Chrome le quita el CSS a este script y todas las llamadas a chrome.* empiezan a fallar
+  // ("Extension context invalidated"). Sin esto, los botones ya dibujados quedaban en pantalla
+  // sin estilo y sin funcionar hasta recargar la página. Ahora se detecta y se limpian solos.
+  function extensionAlive() {
+    try {
+      return !!(chrome.runtime && chrome.runtime.id);
+    } catch (e) {
+      return false;
+    }
   }
+  let pageObserver = null;
+  let pageSyncIntervalId = null;
+  let shutDown = false;
+  function shutdownOrphaned() {
+    if (shutDown) return;
+    shutDown = true;
+    try { removeAllOverlays(); } catch (e) { /* ya no importa */ }
+    if (pageSyncIntervalId) clearInterval(pageSyncIntervalId);
+    if (pageObserver) pageObserver.disconnect();
+    // Por si quedó algún botón o menú que el registro ya no conocía.
+    document.querySelectorAll('.ytdlp-minimalist-overlay, .ytdlp-minimalist-quality-menu').forEach((el) => el.remove());
+    window.__ytdlpMinimalistOverlayInjected = false;
+  }
+
+  // ---- Opciones del menú de calidad (mismas que el popup, ver skin.js) ----
+  // Gramática de los valores (ver parseQualityValue en url-utils.js):
+  //   best:<contenedor> | video:<alto>:<contenedor> | audio:<fmt>[:<kbps>]
+  const QM_CONTAINERS = ['mp4', 'mkv', 'webm'];
+  const QM_AUDIO_FMTS = ['mp3', 'm4a', 'opus'];
+  const QM_AUDIO_BITRATES = [320, 256, 192, 128];
+  // Alturas con su insignia, igual que HEIGHTS en skin.js.
+  const QM_HEIGHTS = [
+    { h: 2160, badge: ['4K', 'b-4k'] },
+    { h: 1440, badge: ['2K', 'b-2k'] },
+    { h: 1080, badge: ['Full HD', 'b-fhd'] },
+    { h: 720, badge: ['HD', 'b-hd'] },
+    { h: 480, badge: ['SD', 'b-sd'] },
+    { h: 360 },
+    { h: 240 },
+    { h: 144 },
+  ];
+
+  // Valor guardado -> estado del menú ({ type, fmt, container }). También
+  // entiende los valores viejos ("best", "video:720", "audio", "audio:m4a").
+  function qmStateOf(value) {
+    const [kind, a, b] = String(value || 'best').split(':');
+    if (kind === 'thumb') return { type: 'thumb', fmt: 'mp3', container: 'mp4' };
+    if (kind === 'audio') return { type: 'audio', fmt: QM_AUDIO_FMTS.includes(a) ? a : 'mp3', container: 'mp4' };
+    const container = kind === 'video' ? b : a;
+    return { type: 'video', fmt: 'mp3', container: QM_CONTAINERS.includes(container) ? container : 'mp4' };
+  }
+
+  // Valor a guardar al cambiar de pestaña (la opción "mejor" de ese estado).
+  function qmDefaultValue(state) {
+    if (state.type === 'thumb') return 'thumb';
+    if (state.type === 'audio') return `audio:${state.fmt}:320`;
+    return `best:${state.container}`;
+  }
+
+  // Filas a mostrar según el estado: nombre, insignia, formato a la derecha.
+  function qmRowsFor(state, lang) {
+    if (state.type === 'thumb') {
+      return [{ value: 'thumb', name: t('skin_best_quality', lang), fmt: 'JPG', best: true }];
+    }
+    if (state.type === 'audio') {
+      return QM_AUDIO_BITRATES.map((k, i) => ({
+        value: `audio:${state.fmt}:${k}`, name: `${k} kbps`, fmt: state.fmt.toUpperCase(), best: i === 0,
+      }));
+    }
+    const c = state.container;
+    return [
+      { value: `best:${c}`, name: t('skin_best_quality', lang), fmt: c.toUpperCase(), best: true },
+      ...QM_HEIGHTS.map(({ h, badge }) => ({ value: `video:${h}:${c}`, name: `${h}p`, badge, fmt: c.toUpperCase() })),
+    ];
+  }
+
+  // Estado actual del menú, compartido por todos los botones de la página.
+  // Arranca con lo último que se eligió (contenedor/formato) para no tener
+  // que cambiarlo en cada video; se mantiene al día con lo que se elija en
+  // el popup (ver chrome.storage.onChanged más abajo).
+  let quickMenuState = qmStateOf('best');
 
   // Idioma actual de la interfaz del botón flotante. Se lee al iniciar (ver
   // init más abajo) y se actualiza en caliente si cambia desde el popup o
@@ -158,6 +233,32 @@
   // Mismo problema con el título: document.title en el feed es genérico
   // ("Inicio / X") en vez del tweet puntual. Si podemos, usamos el texto
   // del tweet (o el nombre de quien lo publicó) como título más útil.
+  // Miniatura de la página: poster del <video>, o og:image / twitter:image.
+  // En YouTube no hace falta (el popup arma la miniatura con el id del video).
+  function getPageThumbnail(videoEl) {
+    try {
+      const abs = (u) => {
+        if (!u) return null;
+        const url = new URL(u, location.href);
+        if (url.protocol === 'http:') url.protocol = 'https:';
+        return url.protocol === 'https:' ? url.href : null;
+      };
+      const candidates = [];
+      if (videoEl && videoEl.poster) candidates.push(videoEl.poster);
+      ['meta[property="og:image"]', 'meta[property="og:image:url"]', 'meta[name="twitter:image"]', 'meta[name="twitter:image:src"]'].forEach((sel) => {
+        const m = document.querySelector(sel);
+        if (m && m.content) candidates.push(m.content);
+      });
+      const link = document.querySelector('link[rel="image_src"]');
+      if (link && link.href) candidates.push(link.href);
+      for (const c of candidates) {
+        const a = abs(c);
+        if (a) return a;
+      }
+    } catch (e) { /* sin miniatura */ }
+    return null;
+  }
+
   function getEffectiveTitle(videoEl) {
     if (isXOrTwitter(location.hostname)) {
       const article = videoEl ? videoEl.closest('article') : null;
@@ -282,7 +383,7 @@
   // lo vuelva a crear mientras ese mismo <video> siga en pantalla.
   function buildOverlay(mode, videoEl, onDismiss) {
     const wrap = document.createElement('div');
-    wrap.className = 'ytdlp-minimalist-overlay ' + (mode === 'text' ? 'mode-text' : 'mode-icon');
+    wrap.className = 'ytdlp-minimalist-overlay ' + (mode === 'text' ? 'mode-text' : 'mode-icon') + (currentTheme === 'dark' ? ' theme-dark' : '');
 
     const btn = document.createElement('button');
     btn.className = 'ytdlp-minimalist-btn';
@@ -344,6 +445,10 @@
     // el mismo ciclo para refrescar el estado "ya descargado" del punto de
     // arriba.
     const reposition = () => {
+      if (!extensionAlive()) {
+        shutdownOrphaned();
+        return;
+      }
       positionOverlay(wrap, videoEl, userPositioned);
       updateDownloadedVisual();
     };
@@ -391,6 +496,7 @@
           type: 'send-url',
           url: cleanDownloadUrl(getEffectiveDownloadUrl(videoEl)),
           title: getEffectiveTitle(videoEl),
+          thumbnail: getPageThumbnail(videoEl),
           quality,
         },
         (response) => {
@@ -433,34 +539,145 @@
       qualityMenu.classList.remove('open');
     }
 
-    function openQualityMenu() {
-      // Siempre se marca "Mejor calidad (video+audio)" como opción actual
-      // acá, sin importar qué calidad se haya usado la última vez — este
-      // menú es de descarga rápida por video, no un ajuste persistente, así
-      // que no tiene sentido que arrastre la calidad de una descarga
-      // anterior (ver historial de por qué se hizo así). Igual seguimos
-      // guardando en storage la calidad elegida, porque el <select> del
-      // popup de la extensión sí usa ese valor como su propio default.
-      qualityMenu.innerHTML = '';
-      for (const opt of getQualityOptions(currentLang)) {
+    // Ubica el menú junto al botón sin salirse de la ventana: debajo si
+    // entra, si no arriba, y si tampoco entra se ajusta al borde (el menú
+    // tiene scroll propio). Se vuelve a llamar al cambiar de pestaña porque
+    // el alto cambia (video tiene más filas que audio).
+    function positionQualityMenu() {
+      const btnRect = btn.getBoundingClientRect();
+      const margin = 8;
+      const menuW = qualityMenu.offsetWidth;
+      const menuH = qualityMenu.offsetHeight;
+      let top = btnRect.bottom + 4;
+      if (top + menuH > window.innerHeight - margin) {
+        const above = btnRect.top - 4 - menuH;
+        top = above >= margin ? above : Math.max(margin, window.innerHeight - margin - menuH);
+      }
+      // Alineado a la derecha del botón, sin salirse de la ventana.
+      const left = Math.min(Math.max(4, btnRect.right - menuW), Math.max(4, window.innerWidth - menuW - 4));
+      qualityMenu.style.top = top + 'px';
+      qualityMenu.style.left = left + 'px';
+    }
+
+    function makeTabBar(items, activeKey, onPick) {
+      const bar = document.createElement('div');
+      bar.className = 'ytdlp-qm-tabs';
+      bar.setAttribute('role', 'tablist');
+      for (const item of items) {
+        const tab = document.createElement('button');
+        tab.type = 'button';
+        tab.className = 'ytdlp-qm-tab' + (item.key === activeKey ? ' is-active' : '');
+        tab.setAttribute('role', 'tab');
+        tab.setAttribute('aria-selected', item.key === activeKey ? 'true' : 'false');
+        tab.textContent = item.label;
+        tab.addEventListener('click', (e) => {
+          // stopPropagation: al redibujar el menú este botón sale del DOM y
+          // el listener de "clic afuera" (document) lo tomaría por un clic
+          // fuera del menú y lo cerraría.
+          e.stopPropagation();
+          if (item.key !== activeKey) onPick(item.key);
+        });
+        bar.appendChild(tab);
+      }
+      return bar;
+    }
+
+    // Cambiar de pestaña actualiza el estado compartido, lo guarda (igual que
+    // el popup, que también recuerda la última elección) y redibuja el menú.
+    function pickMenuState(patch) {
+      quickMenuState = { ...quickMenuState, ...patch };
+      chrome.storage.sync.set({ [QUALITY_STORAGE_KEY]: qmDefaultValue(quickMenuState) });
+      renderQualityMenu();
+      positionQualityMenu();
+    }
+
+    // Diseño: mismo estilo y mismas opciones que la lista de calidades del
+    // popup (skin.js), en versión compacta — título "// Seleccionar calidad",
+    // pestañas Video/Audio, contenedor (MP4/MKV/WEBM) o formato de audio
+    // (MP3/M4A/OPUS), y filas de una línea con nombre + insignia + formato.
+    // Un clic en una fila sigue enviando la descarga directo.
+    function renderQualityMenu() {
+      const state = quickMenuState;
+      qualityMenu.textContent = '';
+      qualityMenu.setAttribute('role', 'menu');
+
+      const title = document.createElement('div');
+      title.className = 'ytdlp-qm-title';
+      title.textContent = t('skin_select_quality', currentLang);
+      qualityMenu.appendChild(title);
+
+      qualityMenu.appendChild(makeTabBar(
+        [{ key: 'video', label: t('skin_tab_video', currentLang) }, { key: 'audio', label: t('skin_tab_audio', currentLang) }, { key: 'thumb', label: t('skin_tab_thumb', currentLang) }],
+        state.type,
+        (type) => pickMenuState({ type })
+      ));
+      if (state.type === 'thumb') {
+        // Solo miniatura: sin sub-pestañas de formato.
+      } else if (state.type === 'audio') {
+        qualityMenu.appendChild(makeTabBar(
+          QM_AUDIO_FMTS.map((f) => ({ key: f, label: f.toUpperCase() })),
+          state.fmt,
+          (fmt) => pickMenuState({ fmt })
+        ));
+      } else {
+        qualityMenu.appendChild(makeTabBar(
+          QM_CONTAINERS.map((c) => ({ key: c, label: c.toUpperCase() })),
+          state.container,
+          (container) => pickMenuState({ container })
+        ));
+      }
+
+      const list = document.createElement('div');
+      list.className = 'ytdlp-qm-list';
+      for (const row of qmRowsFor(state, currentLang)) {
         const item = document.createElement('button');
         item.type = 'button';
-        item.textContent = opt.label;
-        if (opt.value === 'best') item.classList.add('is-current');
+        item.className = 'ytdlp-qm-row';
+        item.setAttribute('role', 'menuitem');
+        const summary = [row.name, row.badge ? row.badge[0] : '', row.fmt].filter(Boolean).join(' ');
+        item.setAttribute('aria-label', summary);
+        item.title = summary;
+        // La primera fila (la "mejor") es la opción destacada, como en el popup.
+        if (row.best) item.classList.add('is-current');
+
+        const name = document.createElement('span');
+        name.className = 'ytdlp-qm-name';
+        name.textContent = row.name;
+        item.appendChild(name);
+
+        if (row.best) {
+          const b = document.createElement('span');
+          b.className = 'ytdlp-qm-badge b-best';
+          b.textContent = t('skin_best_badge', currentLang);
+          item.appendChild(b);
+        }
+        if (row.badge) {
+          const b = document.createElement('span');
+          b.className = 'ytdlp-qm-badge ' + row.badge[1];
+          b.textContent = row.badge[0];
+          item.appendChild(b);
+        }
+        const fmt = document.createElement('span');
+        fmt.className = 'ytdlp-qm-fmt';
+        fmt.textContent = row.fmt;
+        item.appendChild(fmt);
+
         item.addEventListener('click', (e) => {
           e.stopPropagation();
-          chrome.storage.sync.set({ [QUALITY_STORAGE_KEY]: opt.value });
+          chrome.storage.sync.set({ [QUALITY_STORAGE_KEY]: row.value });
           closeQualityMenu();
-          doSend(parseQualityValue(opt.value));
+          doSend(parseQualityValue(row.value));
         });
-        qualityMenu.appendChild(item);
+        list.appendChild(item);
       }
-      const btnRect = btn.getBoundingClientRect();
-      qualityMenu.style.top = Math.min(btnRect.bottom + 4, window.innerHeight - 8) + 'px';
-      // Alineado a la derecha del botón, sin salirse de la ventana por la izquierda.
-      const menuWidth = 176; // debe matchear min-width del CSS + padding
-      qualityMenu.style.left = Math.max(4, btnRect.right - menuWidth) + 'px';
+      qualityMenu.appendChild(list);
+    }
+
+    function openQualityMenu() {
+      renderQualityMenu();
+      // Se abre primero para poder medir su tamaño real y ubicarlo.
       qualityMenu.classList.add('open');
+      positionQualityMenu();
     }
 
     btn.addEventListener('contextmenu', (e) => {
@@ -486,6 +703,7 @@
   // etc.) y hace que funcione automáticamente en cualquier sitio que
   // yt-dlp soporte, sin tener que mantener una lista fija de dominios.
   let currentMode = 'icon';
+  let currentTheme = 'light';
   // Interruptor general del botón flotante (ver toggle "Botón flotante" en
   // popup.js, guardado aparte de overlayMode para no perder la preferencia
   // de estilo ícono/texto cuando se apaga y se vuelve a prender).
@@ -660,6 +878,10 @@
   }
 
   function syncOverlay() {
+    if (!extensionAlive()) {
+      shutdownOrphaned();
+      return;
+    }
     if (!overlayEnabled || isSiteDisabled()) {
       removeAllOverlays();
       return;
@@ -694,13 +916,15 @@
     // correctos en vez de "saltar" un instante después.
     loadDownloadHistory(() => {
       chrome.storage.sync.get(
-        { overlayMode: 'icon', overlayEnabled: true, [DISABLED_SITES_KEY]: [], [EXTENSION_DISABLED_SITES_KEY]: [], [I18N_LANG_KEY]: I18N_DEFAULT_LANG },
+        { overlayMode: 'icon', overlayTheme: 'light', overlayEnabled: true, [DISABLED_SITES_KEY]: [], [EXTENSION_DISABLED_SITES_KEY]: [], [I18N_LANG_KEY]: I18N_DEFAULT_LANG, [QUALITY_STORAGE_KEY]: 'best' },
         (data) => {
         currentMode = data.overlayMode === 'text' ? 'text' : 'icon';
+        currentTheme = data.overlayTheme === 'dark' ? 'dark' : 'light';
         overlayEnabled = data.overlayEnabled !== false;
         disabledSites = Array.isArray(data[DISABLED_SITES_KEY]) ? data[DISABLED_SITES_KEY] : [];
         extensionDisabledSites = Array.isArray(data[EXTENSION_DISABLED_SITES_KEY]) ? data[EXTENSION_DISABLED_SITES_KEY] : [];
         currentLang = i18nNormalizeLang(data[I18N_LANG_KEY]);
+        quickMenuState = qmStateOf(data[QUALITY_STORAGE_KEY]);
         syncOverlay();
 
         // Muchos sitios (YouTube, X/Twitter, Instagram, etc.) son SPA y montan
@@ -709,6 +933,7 @@
         // scroll infinito. Por eso vigilamos el DOM en vez de chequear una
         // sola vez.
         const observer = new MutationObserver(() => syncOverlay());
+        pageObserver = observer;
         observer.observe(document.documentElement, {
           childList: true,
           subtree: true,
@@ -717,7 +942,7 @@
         // Respaldo por si algún cambio no dispara el MutationObserver (p. ej.
         // un <video> que solo cambia de tamaño/posición al hacer scroll, o
         // entra/sale del viewport sin que cambie el DOM).
-        setInterval(syncOverlay, 1000);
+        pageSyncIntervalId = setInterval(syncOverlay, 1000);
       });
     });
   }
@@ -739,7 +964,7 @@
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (!message || message.type !== 'get-effective-url') return;
     const video = findBestVideoEl();
-    sendResponse({ url: getEffectiveDownloadUrl(video), title: getEffectiveTitle(video) });
+    sendResponse({ url: getEffectiveDownloadUrl(video), title: getEffectiveTitle(video), thumbnail: getPageThumbnail(video) });
   });
 
   // Si el usuario cambia el modo o apaga/prende el botón flotante desde los
@@ -748,9 +973,18 @@
   // la pestaña.
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== 'sync') return;
+    // La última calidad cambió (desde el popup o desde otro botón): solo se
+    // actualiza el estado del menú; no hace falta reconstruir los botones.
+    if (changes[QUALITY_STORAGE_KEY]) {
+      quickMenuState = qmStateOf(changes[QUALITY_STORAGE_KEY].newValue);
+    }
     let relevant = false;
     if (changes.overlayMode) {
       currentMode = changes.overlayMode.newValue === 'text' ? 'text' : 'icon';
+      relevant = true;
+    }
+    if (changes.overlayTheme) {
+      currentTheme = changes.overlayTheme.newValue === 'dark' ? 'dark' : 'light';
       relevant = true;
     }
     if (changes.overlayEnabled) {

@@ -1935,7 +1935,7 @@ html, body {
   text-transform: uppercase;
 }
 
-/* Select de contenedor de salida (mp4/mkv/webm/mov) en la columna "Formato".
+/* Select de contenedor de salida (mp4/mkv/webm) en la columna "Formato".
    Se estiliza para verse como el resto de las celdas de texto de la fila,
    sin la apariencia por defecto de un <select> nativo. */
 .download-item .ext-select {
@@ -3594,19 +3594,6 @@ kbd {
   color: var(--fg-dimmer);
 }
 
-.about-credit {
-  margin-top: 2px;
-}
-
-.about-credit a {
-  color: var(--accent, #58a6ff);
-  text-decoration: none;
-}
-
-.about-credit a:hover {
-  text-decoration: underline;
-}
-
 .about-link {
   display: inline-block;
   margin-top: 6px;
@@ -3656,6 +3643,19 @@ kbd {
   color: var(--fg-dim);
   white-space: pre-wrap;
   word-break: break-word;
+  /* html/body tienen user-select: none; aquí se permite seleccionar y copiar la salida */
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: text;
+}
+
+.terminal-output * {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.terminal-output ::selection {
+  background: var(--accent-soft, rgba(88, 166, 255, 0.35));
 }
 
 .terminal-output .terminal-line-stderr {
@@ -3944,4 +3944,671 @@ kbd {
   font-size: 11px;
   color: var(--fg-dimmer);
   text-align: center;
+}
+
+
+/* Número de cada video en la playlist (para ubicar rangos, ej. del 45 al 83). */
+.playlist-item-num {
+  flex-shrink: 0;
+  min-width: 2.2em;
+  text-align: right;
+  color: var(--fg-dim);
+  font-size: 0.85em;
+  user-select: none;
+}
+.playlist-range-hint {
+  color: var(--fg-dim);
+  font-size: 11px;
+  flex-basis: 100%;
+  margin: 0;
+  text-align: center;
+  user-select: none;
+}
+
+/* Panel del botón "rango" (Desde / Hasta) */
+.playlist-range-panel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  width: 520px;
+  max-width: 90%;
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--fg-dim);
+}
+.playlist-range-panel.hidden { display: none; }
+.playlist-range-panel input[type='number'] {
+  width: 64px;
+  padding: 4px 6px;
+  background: transparent;
+  color: inherit;
+  border: 1px solid #333;
+  border-radius: 3px;
+  font: inherit;
+}
+
+
+/* ===== Menú flotante de calidad de la playlist (estilo extensión) ===== */
+.playlist-quality { position: relative; }
+.playlist-quality-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #161616;
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 4px 8px;
+  font-family: var(--mono);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.playlist-quality-btn:hover { border-color: var(--fg-dim); }
+.pq-caret { color: var(--fg-dim); font-size: 10px; }
+.pq-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 50;
+  width: 270px;
+  padding: 10px;
+  background: #101010;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+  font-family: var(--mono);
+}
+.pq-menu.hidden { display: none; }
+.pq-title { color: var(--fg-dim); font-size: 11px; margin-bottom: 8px; }
+.pq-tabs {
+  display: flex;
+  margin-bottom: 8px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.pq-tab {
+  flex: 1;
+  padding: 6px 4px;
+  background: transparent;
+  color: var(--fg-dim);
+  border: 0;
+  border-right: 1px solid var(--border);
+  font-family: inherit;
+  font-size: 11.5px;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.pq-tab:last-child { border-right: 0; }
+.pq-tab:hover { background: #1a1a1a; color: var(--fg); }
+.pq-tab.active { background: var(--accent); color: #111; font-weight: 600; }
+.pq-list { display: flex; flex-direction: column; max-height: 260px; overflow-y: auto; }
+.pq-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 6px;
+  background: transparent;
+  color: var(--fg-dim);
+  border: 0;
+  border-radius: 3px;
+  font-family: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+.pq-row:hover { background: #1a1a1a; color: var(--fg); }
+.pq-row.selected { color: var(--fg); font-weight: 600; }
+.pq-row.selected .pq-name::before { content: '\25B8\00a0'; }
+.pq-name { flex: 0 1 auto; }
+.pq-fmt { margin-left: auto; color: var(--fg-dim); font-weight: 600; }
+.pq-badge {
+  padding: 0 5px;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+}
+.pq-b-best { color: var(--accent-cyan); }
+.pq-b-4k { background: var(--accent-cyan); border-color: var(--accent-cyan); color: #111; }
+.pq-b-2k { color: var(--accent-cyan); }
+.pq-b-fhd, .pq-b-hd { color: #5fd16f; }
+.pq-b-sd { color: #d9a441; }
+
+
+/* ===== Pantalla de playlist con el mismo diseño que la de un solo video =====
+   Izquierda: miniatura, título y controles. Derecha: lista de videos + botón. */
+#screen-playlist {
+  justify-content: flex-start;
+  padding-top: 32px;
+  padding-bottom: 8px;
+  align-items: flex-end;
+  overflow-y: auto;
+}
+
+#screen-playlist .playlist-meta-col {
+  width: 350px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  text-align: left;
+  transition: width 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.app-sidebar.expanded ~ .screen-container #screen-playlist .playlist-meta-col {
+  width: 270px;
+}
+
+#screen-playlist .video-thumb {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 9;
+  min-height: 0;
+  object-fit: cover;
+}
+
+#screen-playlist #playlist-title {
+  font-size: 18px;
+  margin: 0 0 6px;
+  text-align: left;
+}
+
+#screen-playlist #playlist-count {
+  font-size: 14px;
+  margin: 0;
+  justify-content: flex-start;
+  text-align: left;
+}
+
+#screen-playlist .playlist-folder-row,
+#screen-playlist .playlist-toolbar {
+  width: 100%;
+  max-width: none;
+  margin-top: 0;
+}
+
+#screen-playlist .playlist-toolbar {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+#screen-playlist .playlist-toolbar-right {
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+#screen-playlist .playlist-quality {
+  width: 100%;
+}
+
+/* El menú de calidad se abre hacia arriba (la columna izquierda tiene espacio
+   libre arriba y poco abajo) y alineado a la izquierda. */
+#screen-playlist .pq-menu {
+  top: auto;
+  bottom: calc(100% + 6px);
+  left: 0;
+  right: auto;
+}
+
+#screen-playlist .playlist-range-panel {
+  width: 100%;
+  max-width: none;
+  margin-top: 0;
+  justify-content: flex-start;
+}
+
+#screen-playlist .playlist-range-hint {
+  text-align: left;
+}
+
+#screen-playlist #playlist-frame {
+  flex: none;
+  width: 450px;
+  height: 405px;
+  min-height: 0;
+  margin-top: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+#screen-playlist .playlist-list {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+  overflow-y: auto;
+}
+
+#screen-playlist #status-playlist {
+  width: 450px;
+  max-width: 100%;
+  min-height: 18px;
+  margin-top: 14px;
+  font-size: 13px;
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+
+/* Miniatura de la playlist más chica para dejar más espacio a la info y los controles de abajo */
+#screen-playlist .video-thumb {
+  width: 220px;
+  max-width: 100%;
+}
+
+/* Más espacio entre las opciones de la columna izquierda de la playlist */
+#screen-playlist .playlist-meta-col {
+  gap: 20px;
+}
+
+#screen-playlist .playlist-folder-row {
+  gap: 14px;
+}
+
+#screen-playlist .playlist-toolbar {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+#screen-playlist .playlist-toolbar-right {
+  gap: 10px;
+}
+
+#screen-playlist .playlist-range-panel {
+  gap: 12px;
+}
+
+/* Mensaje "X de N seleccionados" de la playlist */
+#screen-playlist .playlist-selected-count {
+  margin: 6px 0 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent-cyan);
+}
+
+#screen-playlist .playlist-selected-count.none {
+  color: var(--fg-dim);
+  font-weight: 400;
+}
+
+/* La calidad ahora va arriba de la carpeta de descarga: el menú se abre hacia abajo. */
+#screen-playlist .pq-menu {
+  top: calc(100% + 6px);
+  bottom: auto;
+}
+
+/* El menú de calidad se abre hacia la derecha (sobre el hueco de la columna
+   de videos), pegado al borde inferior del botón, para no salirse de la ventana. */
+#screen-playlist .pq-menu {
+  top: auto;
+  bottom: 0;
+  left: calc(100% - 120px);
+  right: auto;
+}
+
+#screen-playlist .pq-list {
+  max-height: 200px;
+}
+
+
+/* ---------- Playlist: cuadro de videos más grande y filas más grandes ---------- */
+/* Con la barra lateral colapsada hay espacio: columna izquierda 330px + gap 38px +
+   cuadro 470px (antes 350 + 450). Con la barra expandida se mantienen los tamaños
+   anteriores del cuadro para no provocar scroll horizontal. */
+.app-sidebar:not(.expanded) ~ .screen-container #screen-playlist .playlist-meta-col {
+  width: 330px;
+}
+
+#screen-playlist #playlist-frame {
+  height: 428px;
+}
+
+.app-sidebar:not(.expanded) ~ .screen-container #screen-playlist #playlist-frame,
+.app-sidebar:not(.expanded) ~ .screen-container #screen-playlist #status-playlist {
+  width: 470px;
+}
+
+#screen-playlist .playlist-item {
+  gap: 12px;
+  padding: 10px 14px;
+  font-size: 14px;
+}
+
+#screen-playlist .playlist-item input[type='checkbox'] {
+  width: 15px;
+  height: 15px;
+}
+
+#screen-playlist .playlist-item-thumb {
+  width: 64px;
+  height: 36px;
+  border-radius: 3px;
+}
+
+#screen-playlist .playlist-item-duration {
+  font-size: 12px;
+}
+
+
+/* ---------- Playlist: más espacio para el título de cada video ---------- */
+/* El título puede ocupar hasta 2 líneas (antes se cortaba en 1 con "…") y se
+   recortan los márgenes laterales y los espacios entre elementos. */
+#screen-playlist .playlist-item {
+  gap: 10px;
+  padding: 9px 8px 9px 12px;
+}
+
+#screen-playlist .playlist-item-num {
+  min-width: 1.9em;
+}
+
+#screen-playlist .playlist-item-title {
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  white-space: normal;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
+  line-height: 1.3;
+  font-size: 13px;
+}
+
+
+/* ---------- Playlist: estado de cada video solo con icono ---------- */
+#screen-playlist .playlist-item-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+}
+
+.pl-status-spin {
+  animation: pl-status-spin 0.9s linear infinite;
+}
+
+@keyframes pl-status-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+
+/* ---------- Playlist: el cuadro de videos se extiende hacia la info ---------- */
+/* En vez de un ancho fijo pegado al borde derecho (que dejaba un hueco grande
+   entre la info y el cuadro, sobre todo en ventanas más anchas), la columna
+   derecha ocupa todo el espacio libre que deja la columna izquierda. */
+#screen-playlist .picker-layout,
+.app-sidebar.expanded ~ .screen-container #screen-playlist .picker-layout {
+  width: 100%;
+  gap: 24px;
+}
+
+#screen-playlist .picker-layout-right {
+  flex: 1 1 0;
+  min-width: 0;
+  align-items: stretch;
+}
+
+#screen-playlist #playlist-frame,
+#screen-playlist #status-playlist,
+.app-sidebar:not(.expanded) ~ .screen-container #screen-playlist #playlist-frame,
+.app-sidebar:not(.expanded) ~ .screen-container #screen-playlist #status-playlist {
+  width: 100%;
+  max-width: none;
+}
+
+#screen-playlist .picker-layout-right .picker-actions {
+  display: flex;
+  justify-content: center;
+}
+
+
+/* ---------- Diálogo de cierre: se oculta "Recordar mi elección" en el aviso de descargas ---------- */
+.confirm-dialog-checkbox.hidden {
+  display: none;
+}
+
+
+/* ---------- Playlist: buscador y filtro por duración ---------- */
+.playlist-filter-bar {
+  display: flex;
+  gap: 8px;
+  padding: 2px 10px 8px;
+}
+
+.playlist-filter-bar input[type='search'] {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  background: transparent;
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-family: var(--mono);
+  font-size: 12px;
+  user-select: text;
+}
+
+.playlist-filter-bar input[type='search']:focus,
+.playlist-filter-bar select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.playlist-filter-bar select {
+  flex-shrink: 0;
+  padding: 6px 6px;
+  background: var(--bg);
+  color: var(--fg-dim);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.playlist-filter-info {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 12px 6px;
+  font-size: 11px;
+  color: var(--fg-dimmer);
+}
+
+.playlist-filter-info.hidden {
+  display: none;
+}
+
+.playlist-filter-info button {
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-family: var(--mono);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.playlist-filter-info button:hover {
+  border-color: var(--accent);
+}
+
+.playlist-filter-info button.hidden {
+  display: none;
+}
+
+#screen-playlist .playlist-item.filtered-out {
+  display: none;
+}
+
+/* ---------- Controles de la cola (simultáneas, límite, acción al terminar) ---------- */
+.queue-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 18px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--fg-dim);
+}
+
+.queue-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.queue-control select,
+.queue-control input[type='text'] {
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 3px 6px;
+  font-family: var(--mono);
+  font-size: 12px;
+  outline: none;
+}
+
+.queue-control input[type='text'] {
+  width: 84px;
+}
+
+.queue-control select:focus,
+.queue-control input[type='text']:focus {
+  border-color: var(--accent);
+}
+
+/* ---------- Reordenar la cola arrastrando ---------- */
+.active-dl-handle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 13px;
+  flex-shrink: 0;
+  color: var(--fg-dimmer);
+  font-size: 14px;
+  line-height: 1;
+  cursor: grab;
+  user-select: none;
+}
+
+.history-item.queued-draggable:hover .active-dl-handle {
+  color: var(--fg-dim);
+}
+
+.history-item.dragging {
+  opacity: 0.4;
+}
+
+.history-item.drop-before {
+  box-shadow: 0 -2px 0 0 var(--accent-cyan);
+}
+
+.history-item.drop-after {
+  box-shadow: 0 2px 0 0 var(--accent-cyan);
+}
+
+/* ---------- Cuenta regresiva antes de suspender/apagar ---------- */
+.power-countdown {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 16px;
+  background: var(--bg-titlebar);
+  border: 1px solid var(--accent-cyan);
+  border-radius: 6px;
+  color: var(--fg);
+  font-family: var(--mono);
+  font-size: 12px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+}
+
+.power-countdown.hidden {
+  display: none;
+}
+
+/* ---------- Marcadores rápidos de la plantilla de nombre ---------- */
+.template-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+/* ---------- Buscador y exportación del historial ---------- */
+.history-search-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.history-search-bar.hidden {
+  display: none;
+}
+
+.history-search-bar input[type='text'] {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 5px 8px;
+  font-family: var(--mono);
+  font-size: 12px;
+  outline: none;
+}
+
+.history-search-bar input[type='text']:focus {
+  border-color: var(--accent);
+}
+
+/* ---------- Aviso de link copiado (Inicio) ---------- */
+.clipboard-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 14px auto 0;
+  padding: 8px 14px;
+  max-width: 640px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.03);
+  font-size: 12px;
+  color: var(--fg-dim);
+}
+
+.clipboard-banner.hidden {
+  display: none;
+}
+
+.clipboard-banner-text {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  color: var(--fg);
 }

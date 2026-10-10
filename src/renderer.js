@@ -228,7 +228,9 @@ const playlistBackBtn = document.getElementById('playlist-back-btn');
 const playlistTitleEl = document.getElementById('playlist-title');
 const playlistCountEl = document.getElementById('playlist-count');
 const playlistSelectAllEl = document.getElementById('playlist-select-all');
-const playlistQualitySelect = document.getElementById('playlist-quality-select');
+const playlistQualityBtn = document.getElementById('playlist-quality-btn');
+const playlistQualityBtnText = document.getElementById('playlist-quality-btn-text');
+const playlistQualityMenu = document.getElementById('playlist-quality-menu');
 const playlistReverseBtn = document.getElementById('playlist-reverse-btn');
 const playlistListEl = document.getElementById('playlist-list');
 const playlistDownloadBtn = document.getElementById('playlist-download-btn');
@@ -256,6 +258,10 @@ const screenTerminal = document.getElementById('screen-terminal');
 function updateSidebarActiveStates() {
   const sidebarNewTaskBtn = document.getElementById('sidebar-new-task');
   const sidebarTerminalBtn = document.getElementById('sidebar-terminal');
+  const sidebarPlaylistBtn = document.getElementById('sidebar-playlist');
+  const sidebarVideoBtn = document.getElementById('sidebar-video');
+  if (sidebarVideoBtn) sidebarVideoBtn.classList.toggle('active', screenPicker.classList.contains('active'));
+  if (sidebarPlaylistBtn) sidebarPlaylistBtn.classList.toggle('active', screenPlaylist.classList.contains('active'));
   if (sidebarNewTaskBtn) sidebarNewTaskBtn.classList.toggle('active', screenHome.classList.contains('active'));
   if (sidebarTerminalBtn) sidebarTerminalBtn.classList.toggle('active', screenTerminal.classList.contains('active'));
   if (btnActivity) btnActivity.classList.toggle('active', screenActivity.classList.contains('active'));
@@ -332,6 +338,48 @@ const presetsReferenceBtn = document.getElementById('presets-reference-btn');
 // Elementos del panel de Terminal (ejecutar un comando de yt-dlp "en crudo")
 const terminalOverlay = document.getElementById('terminal-overlay');
 const terminalOutputEl = document.getElementById('terminal-output');
+
+// ---- Seleccionar y copiar texto de la salida de la terminal ----
+// Ctrl+C copia lo seleccionado (si la selección está dentro de la salida); Ctrl+A,
+// con el foco en la salida, selecciona solo su contenido; clic derecho abre un
+// menú con Copiar / Seleccionar todo.
+function terminalSelectionText() {
+  const sel = window.getSelection();
+  if (!sel || sel.isCollapsed || !sel.rangeCount) return '';
+  const range = sel.getRangeAt(0);
+  if (!terminalOutputEl.contains(range.commonAncestorContainer)) return '';
+  return sel.toString();
+}
+
+document.addEventListener('keydown', (e) => {
+  if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
+  const key = e.key.toLowerCase();
+  if (key === 'c') {
+    const text = terminalSelectionText();
+    if (text) {
+      e.preventDefault();
+      window.yoinksAPI.copyText(text);
+    }
+  } else if (key === 'a') {
+    const active = document.activeElement;
+    const typing = active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable);
+    const inTerminal = !typing && document.getElementById('terminal-overlay')?.offsetParent !== null;
+    if (inTerminal) {
+      e.preventDefault();
+      const range = document.createRange();
+      range.selectNodeContents(terminalOutputEl);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+  }
+});
+
+terminalOutputEl.addEventListener('contextmenu', (e) => {
+  e.preventDefault();
+  window.yoinksAPI.showTerminalContextMenu(!!terminalSelectionText());
+});
+
 const terminalCommandInput = document.getElementById('terminal-command-input');
 const terminalRunBtn = document.getElementById('terminal-run-btn');
 const terminalClearInputBtn = document.getElementById('terminal-clear-input-btn');
@@ -369,6 +417,8 @@ const settingLoginStatusEl = document.getElementById('setting-login-status');
 const settingRateLimitInput = document.getElementById('setting-rate-limit');
 const settingRateLimitModeSelect = document.getElementById('setting-rate-limit-mode');
 const settingConcurrentDownloadsSelect = document.getElementById('setting-concurrent-downloads');
+const settingAutoRetriesSelect = document.getElementById('setting-auto-retries');
+const settingNotifyQueueFinishCheckbox = document.getElementById('setting-notify-queue-finish');
 const settingConcurrentFragmentsInput = document.getElementById('setting-concurrent-fragments');
 const settingSubtitlesEnabledCheckbox = document.getElementById('setting-subtitles-enabled');
 const settingSubtitleLangsInput = document.getElementById('setting-subtitle-langs');
@@ -376,6 +426,11 @@ const settingSubtitleModeSelect = document.getElementById('setting-subtitle-mode
 const settingSubtitlesOptionsRow = document.getElementById('setting-subtitles-options-row');
 const settingSubtitleModeRow = document.getElementById('setting-subtitle-mode-row');
 const settingThumbnailsEnabledCheckbox = document.getElementById('setting-thumbnails-enabled');
+const settingClipboardWatchCheckbox = document.getElementById('setting-clipboard-watch');
+const clipboardBannerEl = document.getElementById('clipboard-banner');
+const clipboardBannerTextEl = document.getElementById('clipboard-banner-text');
+const clipboardBannerAddBtn = document.getElementById('clipboard-banner-add');
+const clipboardBannerDismissBtn = document.getElementById('clipboard-banner-dismiss');
 const settingChaptersEnabledCheckbox = document.getElementById('setting-chapters-enabled');
 const settingOrganizeBySiteCheckbox = document.getElementById('setting-organize-by-site');
 const settingSoundEnabledCheckbox = document.getElementById('setting-sound-enabled');
@@ -413,6 +468,13 @@ const updateDenoBtn = document.getElementById('update-deno-btn');
 const updateDenoProgressWrap = document.getElementById('update-deno-progress-wrap');
 const updateDenoProgressFill = document.getElementById('update-deno-progress-fill');
 const updateDenoProgressText = document.getElementById('update-deno-progress-text');
+const updatePotVersionEl = document.getElementById('update-pot-version');
+const updatePotBtn = document.getElementById('update-pot-btn');
+const updatePotProgressWrap = document.getElementById('update-pot-progress-wrap');
+const updatePotProgressFill = document.getElementById('update-pot-progress-fill');
+const updatePotProgressText = document.getElementById('update-pot-progress-text');
+const updatePotAvailableTag = document.getElementById('update-pot-available-tag');
+const updatePotUpToDateTag = document.getElementById('update-pot-uptodate-tag');
 const settingsUpdateBadge = document.getElementById('settings-update-badge');
 const menuUpdatesBadge = document.getElementById('menu-updates-badge');
 const updateYtdlpAvailableTag = document.getElementById('update-ytdlp-available-tag');
@@ -424,7 +486,7 @@ const updateDenoUpToDateTag = document.getElementById('update-deno-uptodate-tag'
 
 // Último resultado conocido de la revisión automática de actualizaciones
 // (se usa para pintar las etiquetas "Nueva versión disponible" al abrir el panel)
-let lastUpdateCheck = { ytdlpUpdateAvailable: false, ffmpegUpdateAvailable: false, denoUpdateAvailable: false };
+let lastUpdateCheck = { ytdlpUpdateAvailable: false, ffmpegUpdateAvailable: false, denoUpdateAvailable: false, potUpdateAvailable: false };
 
 // Elementos del panel de Actividad (Descargas en curso + Historial, unificados con pestañas)
 const btnActivity = document.getElementById('btn-activity');
@@ -445,6 +507,17 @@ const activityPanelHistory = document.getElementById('activity-panel-history');
 const downloadsListEl = document.getElementById('downloads-list');
 const downloadsEmptyEl = document.getElementById('downloads-empty');
 const downloadsToolbarEl = document.getElementById('downloads-toolbar');
+const queueConcurrentSelect = document.getElementById('queue-concurrent-select');
+const queueRateInput = document.getElementById('queue-rate-input');
+const queueAfterSelect = document.getElementById('queue-after-select');
+const errorToolbarEl = document.getElementById('error-toolbar');
+const historySearchBarEl = document.getElementById('history-search-bar');
+const historySearchInput = document.getElementById('history-search-input');
+const historyExportBtn = document.getElementById('history-export-btn');
+const errorRetryAllBtn = document.getElementById('error-retry-all-btn');
+const powerCountdownEl = document.getElementById('power-countdown');
+const powerCountdownTextEl = document.getElementById('power-countdown-text');
+const powerCountdownCancelBtn = document.getElementById('power-countdown-cancel');
 const downloadsSpeedSummaryEl = document.getElementById('downloads-speed-summary');
 const downloadsSpeedSummaryTextEl = document.getElementById('downloads-speed-summary-text');
 const downloadsSelectAllCheckbox = document.getElementById('downloads-select-all');
@@ -476,7 +549,9 @@ let formatItems = []; // formatos detectados del video (+ audio only)
 
 // Contenedores de salida entre los que se puede elegir para las filas de video
 // (columna "Formato"). yt-dlp remuxea/combina al contenedor elegido con ffmpeg.
-const CONTAINER_FORMATS = ['mp4', 'mkv', 'webm', 'mov'];
+// Opciones de yt-dlp para bajar solo la miniatura (convertida a JPG, necesita ffmpeg).
+const THUMBNAIL_ONLY_OPTIONS = '--skip-download --write-thumbnail --convert-thumbnails jpg';
+const CONTAINER_FORMATS = ['mp4', 'mkv', 'webm'];
 // Formatos de audio para el preajuste "Mejor audio disponible".
 const AUDIO_FORMATS = ['mp3', 'm4a', 'opus'];
 let presetItems = []; // presets que coinciden con el sitio
@@ -486,6 +561,49 @@ let selectedIndex = 0;
 function recomputeVisibleOptions() {
   downloadOptions = formatItems.concat(presetItems);
   if (selectedIndex >= downloadOptions.length) selectedIndex = 0;
+}
+
+// Convierte errores técnicos (de Electron IPC / yt-dlp, casi siempre en inglés)
+// en mensajes cortos y claros para el usuario común. Si el mensaje ya viene
+// redactado por la app (los largos de main.js con instrucciones), se deja igual.
+// El texto original siempre queda en la consola para diagnóstico.
+function friendlyError(errOrMessage) {
+  const raw = String((errOrMessage && errOrMessage.message) || errOrMessage || '');
+  // Quita el envoltorio de Electron: "Error invoking remote method 'x': Error: ..."
+  let msg = raw
+    .replace(/^\s*Error invoking remote method '[^']*':\s*/i, '')
+    .replace(/^\s*(Error:\s*)+/i, '')
+    .replace(/^\s*ERROR:\s*/i, '')
+    .replace(/^\[[^\]]+\]\s*[\w-]*:\s*/, '')
+    .trim();
+  const t = (k) => window.i18n.t(k);
+  const rules = [
+    [/http error 403|\b403\b.*forbidden|forbidden/i, 'err_403'],
+    [/http error 429|too many requests|rate.?limit/i, 'err_rate_limit'],
+    [/http error 404|http error 410|\b404\b.*not found|video.*not found/i, 'err_404'],
+    [/not available in your country|geo.?restrict|blocked it in your country|not made this video available in your country/i, 'err_geo'],
+    [/video unavailable|has been removed|no longer available|this video is not available|account associated.*terminated|been terminated/i, 'err_unavailable'],
+    [/getaddrinfo|enotfound|econnreset|econnrefused|etimedout|timed out|timeout|network is unreachable|unable to connect|connection (reset|refused|aborted)|failed to resolve|name resolution|certificate verify/i, 'err_network'],
+    [/enospc|no space left|not enough space/i, 'err_no_space'],
+    [/eacces|eperm|permission denied|operation not permitted/i, 'err_no_permission'],
+    [/requested format is not available|format.*not available/i, 'err_format_unavailable'],
+    [/ffmpeg.*(not found|not installed)|ffprobe.*(not found|not installed)|ffmpeg is not installed/i, 'err_ffmpeg_missing'],
+    [/unsupported url|no video formats found|no video could be found/i, 'err_unsupported_url'],
+  ];
+  for (const [re, key] of rules) {
+    if (re.test(msg)) {
+      if (msg !== raw) console.warn('[error original]', raw);
+      return t(key);
+    }
+  }
+  // Mensajes largos ya redactados por la app: se dejan tal cual.
+  // Mensajes técnicos cortos en inglés sin regla: se muestra una ayuda genérica.
+  const looksTechnical = /^[\x00-\x7F]*$/.test(msg) && /error|exception|failed|unable|invalid|traceback|errno|stderr|yt-dlp/i.test(msg) && msg.length < 400;
+  if (looksTechnical) {
+    console.warn('[error original]', raw);
+    return t('err_generic_hint');
+  }
+  return msg || t('err_generic_hint');
 }
 
 function setStatus(text, type = '', screen = 'home', action = null) {
@@ -506,9 +624,34 @@ function clearResults() {
 
 // ---- Enter en el input dispara la búsqueda de formatos ----
 input.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') handleYoink();
+  if (e.key === 'Enter' && !analyzing) handleYoink();
 });
-yoinkBtn.addEventListener('click', handleYoink);
+yoinkBtn.addEventListener('click', () => {
+  // Mientras se analiza, el mismo botón funciona como "Cancelar".
+  if (analyzing) cancelAnalysis();
+  else handleYoink();
+});
+
+// ---- Cancelar el análisis (búsqueda de formatos / carga de playlist) ----
+let analyzing = false;
+let analyzeRunId = 0;
+
+function setAnalyzing(on) {
+  analyzing = on;
+  yoinkBtn.disabled = false;
+  yoinkBtn.classList.toggle('is-cancel', on);
+  const key = on ? 'btn_cancel' : 'btn_download';
+  yoinkBtn.setAttribute('data-i18n', key);
+  yoinkBtn.textContent = window.i18n.t(key);
+}
+
+function cancelAnalysis() {
+  if (!analyzing) return;
+  analyzeRunId++; // los resultados que lleguen después de esto se ignoran
+  setAnalyzing(false);
+  try { window.yoinksAPI.cancelFetch(); } catch (e) { /* sin consulta en curso */ }
+  setStatus(window.i18n.t('analysis_cancelled'), '', 'home');
+}
 
 // ---- Botón "📋" para pegar del portapapeles / "✕" para borrar el link ----
 function updateClearBtnVisibility() {
@@ -533,16 +676,23 @@ pasteUrlBtn.addEventListener('click', async () => {
     const text = await window.yoinksAPI.readClipboard();
     
     if (text && text.trim()) {
-      input.value = text.trim();
+      // Varios links (uno por línea, etc.): se dejan separados por espacios, porque un <input>
+      // descartaría los saltos de línea y pegaría los links unos con otros.
+      const pastedUrls = extractUrls(text);
+      input.value = pastedUrls.length > 1 ? pastedUrls.join(' ') : text.trim().replace(/\s+/g, ' ');
       updateClearBtnVisibility();
-      setStatus(window.i18n.t('link_pasted'), 'success', 'home');
+      setStatus(
+        pastedUrls.length > 1 ? window.i18n.t('multi_links_detected', { n: pastedUrls.length }) : window.i18n.t('link_pasted'),
+        'success',
+        'home'
+      );
       setTimeout(() => setStatus('', '', 'home'), 2000);
     } else {
       setStatus(window.i18n.t('clipboard_empty'), 'error', 'home');
     }
     input.focus();
   } catch (err) {
-    setStatus(window.i18n.t('generic_error', { error: err.message }), 'error', 'home');
+    setStatus(window.i18n.t('generic_error', { error: friendlyError(err) }), 'error', 'home');
     console.error('Clipboard error:', err);
   } finally {
     pasteUrlBtn.disabled = false;
@@ -551,6 +701,96 @@ pasteUrlBtn.addEventListener('click', async () => {
 });
 
 updateClearBtnVisibility(); // estado inicial (por si el input trae algo precargado)
+
+// ---- Varios links pegados a la vez ----
+// Saca todos los links http(s) de un texto (separados por saltos de línea, espacios o comas),
+// sin repetidos y sin puntuación sobrante al final.
+function extractUrls(text) {
+  const found = String(text || '').match(/https?:\/\/[^\s<>"'`]+/gi) || [];
+  const seen = new Set();
+  const urls = [];
+  found.forEach((raw) => {
+    const url = raw.replace(/[.,;:!?)\]}]+$/, '');
+    try {
+      new URL(url);
+    } catch (e) {
+      return;
+    }
+    if (!seen.has(url)) {
+      seen.add(url);
+      urls.push(url);
+    }
+  });
+  return urls;
+}
+
+// Pegar con Ctrl+V varias líneas con links: se acomodan separados por espacios (ver arriba).
+input.addEventListener('paste', (e) => {
+  const text = e.clipboardData ? e.clipboardData.getData('text') : '';
+  const urls = extractUrls(text);
+  if (urls.length <= 1) return;
+  e.preventDefault();
+  input.value = urls.join(' ');
+  updateClearBtnVisibility();
+  setStatus(window.i18n.t('multi_links_detected', { n: urls.length }), 'success', 'home');
+});
+
+// Arma la pantalla de lista (la misma de las playlists) con los links pegados, para elegir
+// cuáles bajar y en qué calidad. Los títulos reales los pone yt-dlp al descargar.
+function showMultipleLinks(urls) {
+  renderPlaylist({
+    title: window.i18n.t('multi_links_title', { n: urls.length }),
+    entries: urls.map((url) => ({ url, title: url, thumbnail: null, site: '' })),
+  });
+  // Los links sueltos no forman una playlist: por defecto van directo a la carpeta de descargas.
+  playlistCreateFolderCheckbox.checked = false;
+  setStatus('', '', 'home');
+  goToPlaylistScreen();
+}
+
+// ---- Aviso de link copiado al volver a la ventana ----
+let lastSeenClipboardText = null;
+let clipboardBannerUrls = [];
+
+function hideClipboardBanner() {
+  clipboardBannerEl.classList.add('hidden');
+  clipboardBannerUrls = [];
+}
+
+async function checkClipboardForLinks() {
+  if (!screenHome.classList.contains('active')) return;
+  let text = '';
+  try {
+    const settings = await window.yoinksAPI.getSettings();
+    if (!settings || settings.clipboardWatch === false) return;
+    text = await window.yoinksAPI.readClipboard();
+  } catch (e) {
+    return; // portapapeles vacío o inaccesible
+  }
+  if (!text || text === lastSeenClipboardText) return;
+  lastSeenClipboardText = text;
+  const urls = extractUrls(text);
+  if (!urls.length) return;
+  // Si ya está escrito en el campo, no hace falta avisar.
+  if (input.value.trim() && extractUrls(input.value).join(' ') === urls.join(' ')) return;
+  clipboardBannerUrls = urls;
+  clipboardBannerTextEl.textContent =
+    urls.length === 1
+      ? window.i18n.t('clipboard_link_found', { link: urls[0] })
+      : window.i18n.t('clipboard_links_found', { n: urls.length });
+  clipboardBannerEl.classList.remove('hidden');
+}
+
+clipboardBannerAddBtn.addEventListener('click', () => {
+  const urls = clipboardBannerUrls.slice();
+  hideClipboardBanner();
+  if (!urls.length) return;
+  input.value = urls.join(' ');
+  updateClearBtnVisibility();
+  handleYoink();
+});
+clipboardBannerDismissBtn.addEventListener('click', hideClipboardBanner);
+window.addEventListener('focus', checkClipboardForLinks);
 
 // ---- URL enviada desde la extensión del navegador ----
 // main.js puede reenviar el mismo link de arranque en frío varias veces
@@ -563,8 +803,25 @@ updateClearBtnVisibility(); // estado inicial (por si el input trae algo precarg
 // ya estábamos mostrando (por eso no es simplemente "ignorar todo").
 let lastAppliedExtensionUrl = null;
 
-function applyExtensionUrl(url) {
+// extId (id de seguimiento de la extensión del navegador) de un link que llegó
+// SIN calidad: la descarga que el usuario arranque después desde el picker
+// para ese mismo link lo hereda (ver startDownload), así el popup de la
+// extensión puede mostrar su progreso. Se descarta pasado un rato por si el
+// usuario nunca llegó a elegir nada.
+const EXTENSION_PICKER_ID_TTL_MS = 10 * 60 * 1000;
+let pendingExtensionPickerId = null; // { url, extId, at }
+
+function applyExtensionUrl(url, extId) {
   console.log('[extension-debug] applyExtensionUrl llamado con', url, 'lastAppliedExtensionUrl=', lastAppliedExtensionUrl);
+  // Se anota antes del chequeo de duplicados: si el mismo link llega de nuevo
+  // con un extId distinto (un reenvío rápido desde la extensión), el vigente
+  // es el último. Un link sin extId (versión vieja de la extensión) borra el
+  // anterior para no asociarlo por error a otro video.
+  if (url && extId) {
+    pendingExtensionPickerId = { url, extId, at: Date.now() };
+  } else if (url && url !== lastAppliedExtensionUrl) {
+    pendingExtensionPickerId = null;
+  }
   if (!url || url === lastAppliedExtensionUrl) return;
   lastAppliedExtensionUrl = url;
   goToHomeScreen();
@@ -584,9 +841,12 @@ function applyExtensionUrl(url) {
 // Si ya estábamos en la pantalla de calidades (viendo otro video), primero
 // volvemos a la pantalla principal para que se vea el link pegado antes de
 // pasar a buscar los formatos del nuevo video.
-window.yoinksAPI.onExtensionUrl((url) => {
-  console.log('[extension-debug] evento extension:url recibido con', url);
-  applyExtensionUrl(url);
+window.yoinksAPI.onExtensionUrl((payload) => {
+  console.log('[extension-debug] evento extension:url recibido con', payload);
+  // Puede venir como string (link solo) o como { url, extId } (ver
+  // handleUrlFromExtension en main.js).
+  if (payload && typeof payload === 'object') applyExtensionUrl(payload.url, payload.extId);
+  else applyExtensionUrl(payload);
 });
 
 // ---- Descarga directa con calidad elegida desde el navegador (popup/botón flotante) ----
@@ -602,9 +862,12 @@ let lastAppliedExtensionDownloadKey = null;
 // que mejor matchea la calidad pedida. Si la altura/bitrate exacto no está
 // disponible para este video en particular, cae a la más cercana en vez de
 // fallar — igual que elegir manualmente "lo más parecido" en el picker.
-function pickFormatItemForQuality(quality) {
+function pickBaseFormatItemForQuality(quality) {
   if (!quality || quality.type === 'best') {
     return formatItems.find((i) => i.isBest && !i.audioOnly) || null;
+  }
+  if (quality.type === 'thumb') {
+    return formatItems.find((i) => i.isThumbnailOnly) || null;
   }
   if (quality.type === 'audio') {
     const bestAudio = formatItems.find((i) => i.isBest && i.audioOnly) || formatItems.find((i) => i.audioOnly);
@@ -625,6 +888,51 @@ function pickFormatItemForQuality(quality) {
     return sorted.find((i) => parseInt(i.res, 10) <= quality.height) || sorted[0] || null;
   }
   return null;
+}
+
+// Aplica encima de la fila base lo que la extensión pidió además de la
+// resolución/formato: bitrate de audio (kb/s) y contenedor de video (mp4/webm).
+function pickFormatItemForQuality(quality) {
+  const base = pickBaseFormatItemForQuality(quality);
+  if (!base || !quality) return base;
+
+  if (quality.type === 'audio') {
+    const kbps = Number(quality.bitrateKbps);
+    if (Number.isFinite(kbps) && kbps > 0) {
+      return { ...base, audioBitrateKbps: kbps, res: `${kbps} kb/s` };
+    }
+    return base;
+  }
+
+  if ((quality.type === 'video' || quality.type === 'best') && quality.container) {
+    let item = { ...base, ext: quality.container };
+    // Si para esta altura hay una variante webm (VP9), preferimos esa para que
+    // el archivo salga realmente en webm y no tenga que caer a otro contenedor.
+    if (quality.container === 'webm' && Array.isArray(base.codecOptions)) {
+      const webmVariant = base.codecOptions.find((c) => c.ext === 'webm');
+      if (webmVariant) item = { ...item, formatId: webmVariant.formatId };
+    }
+    return item;
+  }
+  return base;
+}
+
+// Convierte quality.trim ({ start, end } en segundos) al formato que espera
+// performDownload ("HH:MM:SS"), ajustándolo a la duración del video. Devuelve
+// null si no hay recorte o si el tramo cae fuera del video.
+function resolveExtensionTrim(quality, info) {
+  const trim = quality && quality.trim;
+  if (!trim) return null;
+  const duration = info && Number(info.duration);
+  let start = Number(trim.start);
+  let end = Number(trim.end);
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
+  if (duration && Number.isFinite(duration)) {
+    if (start >= duration) return null;
+    end = Math.min(end, Math.floor(duration));
+  }
+  if (end <= start) return null;
+  return { start: secondsToTimestamp(start), end: secondsToTimestamp(end), exact: true };
 }
 
 async function applyExtensionDownload(payload) {
@@ -681,10 +989,12 @@ async function applyExtensionDownload(payload) {
     // picker): abrimos el panel de Actividad en "Descargas en curso" apenas
     // arranca (sin esperar a que termine, ver comentario abajo), para que
     // se vea entrar sin que el usuario tenga que ir a buscarlo.
-    startDownload(opt, { extId });
+    // Recorte pedido desde la extensión (segundos): se limita a la duración
+    // real del video; si queda vacío, se descarga completo.
+    startDownload(opt, { extId, trimSection: resolveExtensionTrim(quality, info) });
     goToActivityScreen('downloads');
   } catch (err) {
-    setStatus(window.i18n.t('could_not_read_link', { error: err.message }), 'error', 'home');
+    setStatus(window.i18n.t('could_not_read_link', { error: friendlyError(err) }), 'error', 'home');
   }
 }
 
@@ -706,7 +1016,7 @@ window.yoinksAPI.onExtensionDownload((payload) => {
     if (pending.quality) {
       applyExtensionDownload({ url: pending.url, quality: pending.quality, extId: pending.extId });
     } else {
-      applyExtensionUrl(pending.url);
+      applyExtensionUrl(pending.url, pending.extId);
     }
   } catch (e) {
     // No había link pendiente, o falló la consulta; no hacemos nada.
@@ -720,10 +1030,49 @@ const closeBehaviorCancelBtn = document.getElementById('close-behavior-cancel-bt
 const closeBehaviorCloseBtn = document.getElementById('close-behavior-close-btn');
 const closeBehaviorMinimizeBtn = document.getElementById('close-behavior-minimize-btn');
 
+const closeBehaviorTitleEl = closeBehaviorOverlay.querySelector('.confirm-dialog-title');
+const closeBehaviorTextEl = closeBehaviorOverlay.querySelector('.confirm-dialog-text');
+const closeBehaviorRememberRow = closeBehaviorRememberCheckbox.closest('label');
+let closeWarningActive = false; // true mientras el diálogo muestra el aviso de descargas pendientes
+
 function respondCloseBehavior(action) {
   closeBehaviorOverlay.classList.add('hidden');
-  window.yoinksAPI.respondCloseBehavior({ action, remember: closeBehaviorRememberCheckbox.checked });
+  window.yoinksAPI.respondCloseBehavior({
+    action,
+    // En el aviso de descargas no se recuerda la elección: el diálogo debe volver a
+    // aparecer cada vez que haya algo pendiente.
+    remember: !closeWarningActive && closeBehaviorRememberCheckbox.checked,
+  });
   closeBehaviorRememberCheckbox.checked = false;
+}
+
+// Cuenta las descargas que se perderían al cerrar: activas, en cola y pausadas.
+function getPendingDownloadsDetail() {
+  const t = (key, params) => window.i18n.t(key, params);
+  const downloading = activeDownloads.filter((d) => d.status === 'downloading').length;
+  const queued = activeDownloads.filter((d) => d.status === 'queued').length;
+  const paused = activeDownloads.filter((d) => d.status === 'paused').length;
+  const parts = [];
+  if (downloading) {
+    parts.push(downloading === 1 ? t('downloads_speed_summary_one') : t('downloads_speed_summary_many', { n: downloading }));
+  }
+  if (queued) parts.push(t('downloads_summary_queued', { n: queued }));
+  if (paused) parts.push(paused === 1 ? t('downloads_summary_paused_one') : t('downloads_summary_paused_many', { n: paused }));
+  return { total: downloading + queued + paused, text: parts.join(', ') };
+}
+
+function setCloseDialogMode(warning, detailText) {
+  closeWarningActive = warning;
+  if (warning) {
+    closeBehaviorTitleEl.textContent = window.i18n.t('close_warn_title');
+    closeBehaviorTextEl.textContent = window.i18n.t('close_warn_text', { detail: detailText });
+    closeBehaviorCloseBtn.textContent = window.i18n.t('btn_close_anyway');
+  } else {
+    closeBehaviorTitleEl.textContent = window.i18n.t('confirm_dialog_title');
+    closeBehaviorTextEl.textContent = window.i18n.t('confirm_dialog_text');
+    closeBehaviorCloseBtn.textContent = window.i18n.t('btn_close_program');
+  }
+  if (closeBehaviorRememberRow) closeBehaviorRememberRow.classList.toggle('hidden', warning);
 }
 
 closeBehaviorMinimizeBtn.addEventListener('click', () => respondCloseBehavior('minimize'));
@@ -733,7 +1082,22 @@ closeBehaviorOverlay.addEventListener('click', (e) => {
   if (e.target === closeBehaviorOverlay) respondCloseBehavior('cancel');
 });
 
-window.yoinksAPI.onAskCloseBehavior(() => {
+window.yoinksAPI.onAskCloseBehavior(({ mode } = {}) => {
+  const pending = getPendingDownloadsDetail();
+
+  if (pending.total > 0) {
+    // Hay descargas que se perderían: se avisa siempre, sin importar lo que esté
+    // configurado en Ajustes ('ask', 'close') ni que venga de la bandeja ('quit').
+    setCloseDialogMode(true, pending.text);
+  } else if (mode === 'close' || mode === 'quit') {
+    // Nada pendiente y ya estaba decidido cerrar: se cierra directo, como antes.
+    closeWarningActive = true; // evita guardar nada en Ajustes
+    respondCloseBehavior('close');
+    return;
+  } else {
+    setCloseDialogMode(false);
+  }
+
   closeBehaviorOverlay.classList.remove('hidden');
   closeBehaviorMinimizeBtn.focus();
 });
@@ -752,13 +1116,14 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function withRetries(fn, { maxRetries = 2, delayMs = 1500, onRetry } = {}) {
+async function withRetries(fn, { maxRetries = 2, delayMs = 1500, onRetry, isCancelled } = {}) {
   let lastErr;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
       return await fn();
     } catch (err) {
       lastErr = err;
+      if (isCancelled && isCancelled()) throw err; // cancelado por el usuario: no se reintenta
       if (attempt < maxRetries) {
         if (onRetry) onRetry(attempt + 1, maxRetries);
         await sleep(delayMs);
@@ -775,43 +1140,62 @@ async function handleYoink() {
     return;
   }
 
+  // ---- Varios links pegados a la vez: se arma una lista para descargarlos juntos ----
+  const pastedUrls = extractUrls(url);
+  if (pastedUrls.length > 1) {
+    showMultipleLinks(pastedUrls);
+    return;
+  }
+
   currentUrl = url;
+  hideClipboardBanner();
+
+  // Un análisis nuevo (ej. desde la extensión) reemplaza al que estuviera en curso.
+  if (analyzing) cancelAnalysis();
+  const runId = ++analyzeRunId;
+  const isCancelled = () => runId !== analyzeRunId;
 
   // ---- Si el link trae un ?list=, lo tratamos como playlist ----
   const playlistId = getPlaylistId(url);
   if (playlistId) {
-    yoinkBtn.disabled = true;
+    setAnalyzing(true);
     setStatus(window.i18n.t('loading_playlist'), 'loading', 'home');
     try {
       const result = await withRetries(() => window.yoinksAPI.fetchPlaylist(url), {
         maxRetries: 2,
         delayMs: 1500,
+        isCancelled,
         onRetry: (attempt, total) =>
-          setStatus(window.i18n.t('no_response_retrying', { attempt, total }), 'loading', 'home'),
+          !isCancelled() && setStatus(window.i18n.t('no_response_retrying', { attempt, total }), 'loading', 'home'),
       });
+      if (isCancelled()) return;
       renderPlaylist(result);
       setStatus('', '', 'home');
       goToPlaylistScreen();
     } catch (err) {
-      setStatus(window.i18n.t('could_not_read_playlist', { error: err.message }), 'error', 'home');
+      if (isCancelled()) return;
+      setStatus(window.i18n.t('could_not_read_playlist', { error: friendlyError(err) }), 'error', 'home');
     } finally {
-      yoinkBtn.disabled = false;
+      if (!isCancelled()) setAnalyzing(false);
     }
     return;
   }
 
-  yoinkBtn.disabled = true;
+  setAnalyzing(true);
   setStatus(window.i18n.t('searching_formats'), 'loading', 'home');
 
   try {
     const info = await withRetries(() => window.yoinksAPI.fetchFormats(url), {
       maxRetries: 2,
       delayMs: 1500,
+      isCancelled,
       onRetry: (attempt, total) =>
-        setStatus(window.i18n.t('no_response_retrying', { attempt, total }), 'loading', 'home'),
+        !isCancelled() && setStatus(window.i18n.t('no_response_retrying', { attempt, total }), 'loading', 'home'),
     });
+    if (isCancelled()) return;
     currentVideoInfo = info;
     await checkIfAlreadyDownloaded(info, url);
+    if (isCancelled()) return;
     renderVideoMeta(info);
     resetTrimSection();
     buildDownloadOptions(info);
@@ -821,9 +1205,10 @@ async function handleYoink() {
     setStatus('', '', 'picker');
     goToPickerScreen(); // ---- transición a la "segunda pantalla" con los formatos/presets ----
   } catch (err) {
-    setStatus(window.i18n.t('could_not_read_link', { error: err.message }), 'error', 'home');
+    if (isCancelled()) return;
+    setStatus(window.i18n.t('could_not_read_link', { error: friendlyError(err) }), 'error', 'home');
   } finally {
-    yoinkBtn.disabled = false;
+    if (!isCancelled()) setAnalyzing(false);
   }
 }
 
@@ -1567,7 +1952,7 @@ async function handleVideoInfo() {
     }
     openVideoInfoPanel();
   } catch (err) {
-    setStatus(window.i18n.t('could_not_get_info', { error: err.message }), 'error', 'home');
+    setStatus(window.i18n.t('could_not_get_info', { error: friendlyError(err) }), 'error', 'home');
   } finally {
     infoBtn.disabled = false;
     infoBtn.textContent = originalLabel;
@@ -1998,6 +2383,19 @@ function buildDownloadOptions(info) {
     isBest: true,
   });
 
+  // ---- Opción incorporada "Solo miniatura": no baja video ni audio, solo la imagen (JPG) ----
+  formatItems.push({
+    res: window.i18n.t('thumbnail_only'),
+    ext: 'jpg',
+    size: '',
+    formatId: null,
+    audioOnly: false,
+    isPreset: true,
+    isBest: true,
+    isThumbnailOnly: true,
+    presetOptions: THUMBNAIL_ONLY_OPTIONS,
+  });
+
   for (const f of bestFormats) {
     // Tamaño real (video + el mejor audio con el que se fusiona al descargar).
     // Cuando el sitio no reporta "filesize"/"filesize_approx" para alguna de las
@@ -2114,7 +2512,7 @@ function parsePresetOptionsSummary(optionsStr) {
       optionsStr.match(/--merge-output-format[= ]\s*(\w+)/i) ||
       optionsStr.match(/--recode-video[= ]\s*(\w+)/i) ||
       optionsStr.match(/--remux-video[= ]\s*(\w+)/i) ||
-      optionsStr.match(/\b(mp4|mkv|webm|mov)\b/i);
+      optionsStr.match(/\b(mp4|mkv|webm)\b/i);
     if (containerMatch) parts.push(containerMatch[1].toLowerCase());
   }
 
@@ -2361,7 +2759,7 @@ function appendOptionRow(opt, i) {
     // Los dos preajustes incorporados ("Mejor video y audio" / "Mejor audio")
     // también permiten elegir formato de salida, igual que las filas normales.
     const formatOptions = opt.audioOnly ? AUDIO_FORMATS : CONTAINER_FORMATS;
-    const formatSelectHtml = opt.isBest
+    const formatSelectHtml = opt.isBest && !opt.isThumbnailOnly
       ? `<select class="ext-select preset-ext-select" data-idx="${i}" title="${window.i18n.t('output_format_tooltip')}">
           ${formatOptions.map((fmt) => `<option value="${fmt}" ${opt.ext === fmt ? 'selected' : ''}>${fmt.toUpperCase()}</option>`).join('')}
         </select>`
@@ -2389,9 +2787,9 @@ function appendOptionRow(opt, i) {
     const icon = opt.audioOnly ? '♪' : '▸';
     const badge = getQualityBadge(opt);
     // Solo las filas de video (no audio, no preset) permiten elegir el contenedor
-    // de salida (mp4/mkv/webm/mov); el audio ya tiene sus propias filas por formato.
+    // de salida (mp4/mkv/webm); el audio ya tiene sus propias filas por formato.
     // Las filas de audio también permiten elegir formato de salida (mp3/m4a/opus);
-    // las de video, el contenedor (mp4/mkv/webm/mov).
+    // las de video, el contenedor (mp4/mkv/webm).
     const formatOptions = opt.audioOnly ? AUDIO_FORMATS : CONTAINER_FORMATS;
     const extCell = `<select class="ext-select" data-idx="${i}" title="${window.i18n.t('output_format_tooltip')}">
           ${formatOptions.map((fmt) => `<option value="${fmt}" ${opt.ext === fmt ? 'selected' : ''}>${fmt.toUpperCase()}</option>`).join('')}
@@ -2493,9 +2891,24 @@ function renderPlaylist(result) {
   playlistEntries = (result.entries || []).map((e) => ({ ...e, selected: true }));
   playlistTitleEl.textContent = result.title || window.i18n.t('playlist_default_title');
   playlistCountEl.textContent = `${playlistEntries.length} video${playlistEntries.length === 1 ? '' : 's'}`;
+  // Miniatura grande de la playlist (la propia, o la del primer video si no trae).
+  const playlistThumbEl = document.getElementById('playlist-thumb');
+  if (playlistThumbEl) {
+    const thumbUrl = result.thumbnail || (playlistEntries[0] && playlistEntries[0].thumbnail) || '';
+    if (thumbUrl) {
+      playlistThumbEl.onerror = () => playlistThumbEl.classList.add('hidden');
+      playlistThumbEl.src = thumbUrl;
+      playlistThumbEl.classList.remove('hidden');
+    } else {
+      playlistThumbEl.removeAttribute('src');
+      playlistThumbEl.classList.add('hidden');
+    }
+  }
   playlistSelectAllEl.checked = true;
   statusPlaylistEl.textContent = '';
   statusPlaylistEl.className = 'status';
+  playlistSearchInput.value = '';
+  playlistDurationFilterSelect.value = 'all';
   renderPlaylistList();
 
   // Cada playlist nueva vuelve a la carpeta predeterminada y a crear su propia subcarpeta
@@ -2527,42 +2940,203 @@ playlistPathBrowseBtn.addEventListener('click', async () => {
   }
 });
 
+// Índice de la última fila clicada: sirve de punto de partida para seleccionar un
+// rango con Shift+clic (ej. clic en el 45, Shift+clic en el 83 -> marca del 45 al 83).
+let lastPlaylistClickIndex = null;
+
 function renderPlaylistList() {
   playlistListEl.innerHTML = '';
+  lastPlaylistClickIndex = null;
 
   playlistEntries.forEach((entry, i) => {
     const row = document.createElement('div');
     row.className = 'playlist-item';
     row.innerHTML = `
       <input type="checkbox" class="playlist-item-check" data-index="${i}" ${entry.selected ? 'checked' : ''} />
+      <span class="playlist-item-num">${i + 1}</span>
       <img class="playlist-item-thumb" src="${entry.thumbnail || ''}" alt="" onerror="this.style.visibility='hidden'" />
       <span class="playlist-item-title">${entry.title}</span>
       <span class="playlist-item-duration">${entry.duration ? formatDuration(entry.duration) : ''}</span>
       <span class="playlist-item-status" id="playlist-status-${i}"></span>
     `;
     const checkbox = row.querySelector('.playlist-item-check');
-    checkbox.addEventListener('change', (e) => {
-      entry.selected = e.target.checked;
-      updateSelectAllCheckbox();
+    // Evita que Shift+clic deje texto seleccionado en la lista.
+    row.addEventListener('mousedown', (e) => {
+      if (e.shiftKey) e.preventDefault();
     });
     // Clic en cualquier parte de la fila alterna la selección; si el clic fue
-    // directo sobre el checkbox, dejamos que él mismo lo maneje (evita doble toggle).
+    // directo sobre el checkbox, el navegador ya lo alternó (evita doble toggle).
+    // Con Shift+clic se aplica el mismo estado a todos los videos entre el último
+    // clicado y este (rango), así no hay que marcarlos uno por uno.
     row.addEventListener('click', (e) => {
-      if (e.target === checkbox) return;
-      checkbox.checked = !checkbox.checked;
-      checkbox.dispatchEvent(new Event('change'));
+      if (e.target !== checkbox) checkbox.checked = !checkbox.checked;
+      const state = checkbox.checked;
+      entry.selected = state;
+      if (e.shiftKey && lastPlaylistClickIndex !== null && lastPlaylistClickIndex !== i) {
+        const from = Math.min(lastPlaylistClickIndex, i);
+        const to = Math.max(lastPlaylistClickIndex, i);
+        const checks = playlistListEl.querySelectorAll('.playlist-item-check');
+        for (let k = from; k <= to; k++) {
+          // Con un filtro activo, el rango solo afecta a los videos que se ven.
+          if (playlistListEl.children[k] && playlistListEl.children[k].classList.contains('filtered-out')) continue;
+          playlistEntries[k].selected = state;
+          if (checks[k]) checks[k].checked = state;
+        }
+      }
+      lastPlaylistClickIndex = i;
+      updateSelectAllCheckbox();
     });
     playlistListEl.appendChild(row);
   });
+  applyPlaylistFilter();
+  updatePlaylistSelectedCount();
 }
+
+// ---- Buscador y filtro por duración de la lista ----
+// Solo oculta filas (no las reconstruye), así los índices, las casillas marcadas y los
+// estados de descarga de cada video no cambian. "Seleccionar solo estos" marca lo visible.
+const playlistSearchInput = document.getElementById('playlist-search');
+const playlistDurationFilterSelect = document.getElementById('playlist-duration-filter');
+const playlistFilterInfoEl = document.getElementById('playlist-filter-info');
+const playlistFilterInfoTextEl = document.getElementById('playlist-filter-info-text');
+const playlistFilterOnlyBtn = document.getElementById('playlist-filter-only-btn');
+
+function normalizeSearchText(text) {
+  return String(text || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+}
+
+function playlistEntryMatchesFilter(entry, query, durationKey) {
+  if (query && !normalizeSearchText(entry.title).includes(query)) return false;
+  if (durationKey !== 'all') {
+    const secs = Number(entry.duration);
+    if (!Number.isFinite(secs) || secs <= 0) return false;
+    if (durationKey === 'short' && !(secs < 300)) return false;
+    if (durationKey === 'medium' && !(secs >= 300 && secs <= 1200)) return false;
+    if (durationKey === 'long' && !(secs > 1200)) return false;
+  }
+  return true;
+}
+
+function applyPlaylistFilter() {
+  const query = normalizeSearchText(playlistSearchInput.value.trim());
+  const durationKey = playlistDurationFilterSelect.value || 'all';
+  const active = !!query || durationKey !== 'all';
+  let visible = 0;
+  playlistEntries.forEach((entry, i) => {
+    const row = playlistListEl.children[i];
+    if (!row) return;
+    const matches = !active || playlistEntryMatchesFilter(entry, query, durationKey);
+    row.classList.toggle('filtered-out', !matches);
+    if (matches) visible++;
+  });
+  playlistFilterInfoEl.classList.toggle('hidden', !active);
+  if (active) {
+    playlistFilterInfoTextEl.textContent = visible
+      ? window.i18n.t('playlist_filter_showing', { n: visible, total: playlistEntries.length })
+      : window.i18n.t('playlist_filter_none');
+    playlistFilterOnlyBtn.classList.toggle('hidden', visible === 0);
+  }
+}
+
+function onPlaylistFilterChanged() {
+  applyPlaylistFilter();
+  playlistListEl.scrollTop = 0;
+}
+
+playlistSearchInput.addEventListener('input', onPlaylistFilterChanged);
+playlistDurationFilterSelect.addEventListener('change', onPlaylistFilterChanged);
+// Las teclas escritas aquí no deben disparar atajos globales (ej. Esc = volver a Inicio).
+playlistSearchInput.addEventListener('keydown', (e) => {
+  e.stopPropagation();
+  if (e.key === 'Escape' && playlistSearchInput.value) {
+    playlistSearchInput.value = '';
+    onPlaylistFilterChanged();
+  }
+});
+
+playlistFilterOnlyBtn.addEventListener('click', () => {
+  const query = normalizeSearchText(playlistSearchInput.value.trim());
+  const durationKey = playlistDurationFilterSelect.value || 'all';
+  playlistEntries.forEach((entry) => {
+    entry.selected = playlistEntryMatchesFilter(entry, query, durationKey);
+  });
+  const checks = playlistListEl.querySelectorAll('.playlist-item-check');
+  playlistEntries.forEach((entry, i) => {
+    if (checks[i]) checks[i].checked = entry.selected;
+  });
+  updateSelectAllCheckbox();
+});
 
 function updateSelectAllCheckbox() {
   playlistSelectAllEl.checked = playlistEntries.length > 0 && playlistEntries.every((e) => e.selected);
+  updatePlaylistSelectedCount();
+}
+
+// Mensaje "X de N seleccionados" bajo el título de la playlist.
+function updatePlaylistSelectedCount() {
+  const el = document.getElementById('playlist-selected-count');
+  if (!el) return;
+  const selected = playlistEntries.filter((e) => e.selected).length;
+  el.textContent = window.i18n.t('playlist_selected_count', { selected, total: playlistEntries.length });
+  el.classList.toggle('none', selected === 0);
 }
 
 playlistSelectAllEl.addEventListener('change', (e) => {
   playlistEntries.forEach((entry) => (entry.selected = e.target.checked));
   renderPlaylistList();
+});
+
+// ---- Botón "rango": elegir desde qué video hasta cuál (ej. del 45 al 83) ----
+// Marca solo los videos de ese tramo y desmarca el resto. Los números son los
+// que se ven a la izquierda de cada video en la lista.
+const playlistRangeBtn = document.getElementById('playlist-range-btn');
+const playlistRangePanel = document.getElementById('playlist-range-panel');
+const playlistRangeFromInput = document.getElementById('playlist-range-from');
+const playlistRangeToInput = document.getElementById('playlist-range-to');
+const playlistRangeApplyBtn = document.getElementById('playlist-range-apply');
+
+playlistRangeBtn.addEventListener('click', () => {
+  const opening = playlistRangePanel.classList.contains('hidden');
+  playlistRangePanel.classList.toggle('hidden', !opening);
+  if (opening) {
+    const total = playlistEntries.length;
+    playlistRangeFromInput.max = total;
+    playlistRangeToInput.max = total;
+    if (!playlistRangeFromInput.value) playlistRangeFromInput.value = 1;
+    if (!playlistRangeToInput.value) playlistRangeToInput.value = total;
+    playlistRangeFromInput.focus();
+  }
+});
+
+function applyPlaylistRange() {
+  const total = playlistEntries.length;
+  if (!total) return;
+  let from = parseInt(playlistRangeFromInput.value, 10);
+  let to = parseInt(playlistRangeToInput.value, 10);
+  if (!Number.isFinite(from)) from = 1;
+  if (!Number.isFinite(to)) to = total;
+  from = Math.min(Math.max(from, 1), total);
+  to = Math.min(Math.max(to, 1), total);
+  if (from > to) [from, to] = [to, from];
+  playlistRangeFromInput.value = from;
+  playlistRangeToInput.value = to;
+  playlistEntries.forEach((entry, i) => {
+    entry.selected = i + 1 >= from && i + 1 <= to;
+  });
+  renderPlaylistList();
+  updateSelectAllCheckbox();
+  const firstRow = playlistListEl.children[from - 1];
+  if (firstRow && firstRow.scrollIntoView) firstRow.scrollIntoView({ block: 'nearest' });
+}
+playlistRangeApplyBtn.addEventListener('click', applyPlaylistRange);
+[playlistRangeFromInput, playlistRangeToInput].forEach((el) => {
+  el.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') applyPlaylistRange();
+    e.stopPropagation();
+  });
 });
 
 playlistReverseBtn.addEventListener('click', () => {
@@ -2576,21 +3150,237 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
-// ---- Mapea la calidad elegida a lo que espera el handler de descarga (formatId / audioOnly) ----
-function playlistQualityToDownloadParams(quality) {
-  if (quality === 'audio') return { audioOnly: true, audioFormat: 'mp3' };
-  if (quality.startsWith('audio-')) return { audioOnly: true, audioFormat: quality.slice('audio-'.length) };
-  if (quality === 'best') return { formatId: 'bestvideo+bestaudio/best' };
+// ---- Calidad de la playlist: menú flotante (Video / Audio / Miniatura) ----
+// Mismo estilo que el menú de calidad de la extensión. El valor elegido usa la misma
+// gramática: best:<contenedor> | video:<alto>:<contenedor> | audio:<fmt>:<kbps> | thumb
+const PQ_CONTAINERS = ['mp4', 'mkv', 'webm'];
+const PQ_AUDIO_FMTS = ['mp3', 'm4a', 'opus'];
+const PQ_AUDIO_BITRATES = [320, 256, 192, 128];
+const PQ_HEIGHTS = [
+  { h: 2160, badge: ['4K', 'pq-b-4k'] },
+  { h: 1440, badge: ['2K', 'pq-b-2k'] },
+  { h: 1080, badge: ['Full HD', 'pq-b-fhd'] },
+  { h: 720, badge: ['HD', 'pq-b-hd'] },
+  { h: 480, badge: ['SD', 'pq-b-sd'] },
+  { h: 360 },
+  { h: 240 },
+  { h: 144 },
+];
+let playlistQualityValue = 'best:mp4';
+
+function pqParse(value) {
+  const [kind, a, b] = String(value || 'best:mp4').split(':');
+  if (kind === 'thumb') return { type: 'thumb' };
+  if (kind === 'audio') {
+    const fmt = PQ_AUDIO_FMTS.includes(a) ? a : 'mp3';
+    const kbps = PQ_AUDIO_BITRATES.includes(parseInt(b, 10)) ? parseInt(b, 10) : 320;
+    return { type: 'audio', fmt, kbps };
+  }
+  if (kind === 'video') {
+    const height = parseInt(a, 10);
+    const container = PQ_CONTAINERS.includes(b) ? b : 'mp4';
+    if (Number.isFinite(height) && height > 0) return { type: 'video', height, container };
+  }
+  return { type: 'video', height: null, container: PQ_CONTAINERS.includes(a) ? a : 'mp4' };
+}
+
+function pqLabel(value) {
+  const q = pqParse(value);
+  if (q.type === 'thumb') return `${window.i18n.t('pq_tab_thumb')} (JPG)`;
+  if (q.type === 'audio') return `${q.fmt.toUpperCase()} · ${q.kbps} kbps`;
+  const res = q.height ? `${q.height}p` : window.i18n.t('pq_best_quality');
+  return `${res} · ${q.container.toUpperCase()}`;
+}
+
+function renderPlaylistQualityMenu() {
+  const q = pqParse(playlistQualityValue);
+  const t = (k) => window.i18n.t(k);
+  playlistQualityMenu.textContent = '';
+
+  const title = document.createElement('div');
+  title.className = 'pq-title';
+  title.textContent = t('pq_title');
+  playlistQualityMenu.appendChild(title);
+
+  function tabBar(items, activeKey, onPick) {
+    const bar = document.createElement('div');
+    bar.className = 'pq-tabs';
+    items.forEach(({ key, label }) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'pq-tab' + (key === activeKey ? ' active' : '');
+      b.textContent = label;
+      b.addEventListener('click', (e) => { e.stopPropagation(); onPick(key); });
+      bar.appendChild(b);
+    });
+    playlistQualityMenu.appendChild(bar);
+  }
+
+  tabBar(
+    [
+      { key: 'video', label: t('pq_tab_video') },
+      { key: 'audio', label: t('pq_tab_audio') },
+      { key: 'thumb', label: t('pq_tab_thumb') },
+    ],
+    q.type,
+    (type) => {
+      if (type === q.type) return;
+      if (type === 'thumb') playlistQualityValue = 'thumb';
+      else if (type === 'audio') playlistQualityValue = `audio:${pqLastAudioFmt}:320`;
+      else playlistQualityValue = `best:${pqLastContainer}`;
+      renderPlaylistQualityMenu();
+      updatePlaylistQualityButton();
+    }
+  );
+
+  if (q.type === 'audio') {
+    pqLastAudioFmt = q.fmt;
+    tabBar(PQ_AUDIO_FMTS.map((f) => ({ key: f, label: f.toUpperCase() })), q.fmt, (fmt) => {
+      playlistQualityValue = `audio:${fmt}:${q.kbps}`;
+      renderPlaylistQualityMenu();
+      updatePlaylistQualityButton();
+    });
+  } else if (q.type === 'video') {
+    pqLastContainer = q.container;
+    tabBar(PQ_CONTAINERS.map((c) => ({ key: c, label: c.toUpperCase() })), q.container, (container) => {
+      playlistQualityValue = q.height ? `video:${q.height}:${container}` : `best:${container}`;
+      renderPlaylistQualityMenu();
+      updatePlaylistQualityButton();
+    });
+  }
+
+  // Filas de calidad
+  let rows;
+  if (q.type === 'thumb') {
+    rows = [{ value: 'thumb', name: t('pq_best_quality'), fmt: 'JPG', best: true }];
+  } else if (q.type === 'audio') {
+    rows = PQ_AUDIO_BITRATES.map((k, i) => ({
+      value: `audio:${q.fmt}:${k}`, name: `${k} kbps`, fmt: q.fmt.toUpperCase(), best: i === 0,
+    }));
+  } else {
+    rows = [
+      { value: `best:${q.container}`, name: t('pq_best_quality'), fmt: q.container.toUpperCase(), best: true },
+      ...PQ_HEIGHTS.map(({ h, badge }) => ({
+        value: `video:${h}:${q.container}`, name: `${h}p`, badge, fmt: q.container.toUpperCase(),
+      })),
+    ];
+  }
+
+  const list = document.createElement('div');
+  list.className = 'pq-list';
+  rows.forEach((row) => {
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'pq-row' + (row.value === playlistQualityValue ? ' selected' : '');
+    item.setAttribute('role', 'menuitemradio');
+    item.setAttribute('aria-checked', row.value === playlistQualityValue ? 'true' : 'false');
+
+    const name = document.createElement('span');
+    name.className = 'pq-name';
+    name.textContent = row.name;
+    item.appendChild(name);
+    if (row.best) {
+      const b = document.createElement('span');
+      b.className = 'pq-badge pq-b-best';
+      b.textContent = t('pq_badge_best');
+      item.appendChild(b);
+    }
+    if (row.badge) {
+      const b = document.createElement('span');
+      b.className = 'pq-badge ' + row.badge[1];
+      b.textContent = row.badge[0];
+      item.appendChild(b);
+    }
+    const fmt = document.createElement('span');
+    fmt.className = 'pq-fmt';
+    fmt.textContent = row.fmt;
+    item.appendChild(fmt);
+
+    item.addEventListener('click', (e) => {
+      e.stopPropagation();
+      playlistQualityValue = row.value;
+      updatePlaylistQualityButton();
+      closePlaylistQualityMenu();
+    });
+    list.appendChild(item);
+  });
+  playlistQualityMenu.appendChild(list);
+}
+
+let pqLastAudioFmt = 'mp3';
+let pqLastContainer = 'mp4';
+
+function updatePlaylistQualityButton() {
+  playlistQualityBtnText.textContent = pqLabel(playlistQualityValue);
+}
+
+function openPlaylistQualityMenu() {
+  renderPlaylistQualityMenu();
+  playlistQualityMenu.classList.remove('hidden');
+  playlistQualityBtn.setAttribute('aria-expanded', 'true');
+}
+
+function closePlaylistQualityMenu() {
+  playlistQualityMenu.classList.add('hidden');
+  playlistQualityBtn.setAttribute('aria-expanded', 'false');
+}
+
+playlistQualityBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  if (playlistQualityMenu.classList.contains('hidden')) openPlaylistQualityMenu();
+  else closePlaylistQualityMenu();
+});
+document.addEventListener('click', (e) => {
+  if (!playlistQualityMenu.classList.contains('hidden') && !playlistQualityMenu.contains(e.target)) {
+    closePlaylistQualityMenu();
+  }
+});
+// Esc cierra primero el menú (sin salir de la pantalla de playlist).
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !playlistQualityMenu.classList.contains('hidden')) {
+    e.stopPropagation();
+    closePlaylistQualityMenu();
+  }
+}, true);
+updatePlaylistQualityButton();
+
+// ---- Mapea la calidad elegida a lo que espera el handler de descarga ----
+function playlistQualityToDownloadParams(value) {
+  const q = pqParse(value);
+  if (q.type === 'thumb') return { presetOptions: THUMBNAIL_ONLY_OPTIONS };
+  if (q.type === 'audio') return { audioOnly: true, audioFormat: q.fmt, audioBitrateKbps: q.kbps };
+  if (!q.height) return { formatId: 'bestvideo+bestaudio/best', mergeFormat: q.container };
   return {
-    formatId: `bestvideo[height<=${quality}]+bestaudio/best[height<=${quality}]`,
+    formatId: `bestvideo[height<=${q.height}]+bestaudio/best[height<=${q.height}]`,
+    mergeFormat: q.container,
   };
 }
+
+// Iconos (SVG, toman el color del estado) que reemplazan al texto de estado de cada video.
+// El texto original queda como tooltip y como aria-label.
+const PLAYLIST_STATUS_ICONS = {
+  downloading:
+    '<svg class="pl-status-spin" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M8 2a6 6 0 1 1-6 6" /></svg>',
+  done:
+    '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8.5l3.2 3.2L13 4.8" /></svg>',
+  error:
+    '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" /></svg>',
+  paused:
+    '<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><rect x="4" y="3" width="2.6" height="10" rx="0.6" /><rect x="9.4" y="3" width="2.6" height="10" rx="0.6" /></svg>',
+};
 
 function setPlaylistItemStatus(i, text, cls) {
   const el = document.getElementById(`playlist-status-${i}`);
   if (el) {
-    el.textContent = text;
     el.className = 'playlist-item-status' + (cls ? ' ' + cls : '');
+    el.innerHTML = (cls && PLAYLIST_STATUS_ICONS[cls]) || '';
+    if (text) {
+      el.title = text;
+      el.setAttribute('aria-label', text);
+    } else {
+      el.removeAttribute('title');
+      el.removeAttribute('aria-label');
+    }
   }
 }
 
@@ -2606,21 +3396,14 @@ playlistDownloadBtn.addEventListener('click', async () => {
   }
 
   playlistDownloadBtn.disabled = true;
-  const quality = playlistQualitySelect.value;
-  const params = playlistQualityToDownloadParams(quality);
-  const qualityLabel = playlistQualitySelect.options[playlistQualitySelect.selectedIndex].textContent;
+  const params = playlistQualityToDownloadParams(playlistQualityValue);
+  const qualityLabel = pqLabel(playlistQualityValue);
   const outputDir = playlistCustomPath || playlistDownloadPathInput.value || undefined;
   const subfolder = playlistCreateFolderCheckbox.checked ? playlistTitleEl.textContent : '';
 
-  // Cuántos videos se descargan a la vez, según Configuración de Descarga (por defecto 1 = secuencial)
-  let concurrency = 1;
-  try {
-    const settings = await window.yoinksAPI.getSettings();
-    concurrency = Math.max(1, Math.min(5, parseInt(settings.concurrentDownloads, 10) || 1));
-  } catch (e) {
-    concurrency = 1;
-  }
-  concurrency = Math.min(concurrency, selected.length);
+  // Cuántos videos se descargan a la vez lo decide la cola global (Ajustes de descarga o
+  // el control del panel de descargas; se puede cambiar mientras descarga).
+  await refreshQueueSettings();
 
   let ok = 0;
   let failed = 0;
@@ -2634,8 +3417,11 @@ playlistDownloadBtn.addEventListener('click', async () => {
       formatId: params.formatId,
       audioOnly: params.audioOnly || false,
       audioFormat: params.audioFormat,
+      audioBitrateKbps: params.audioBitrateKbps,
+      mergeFormat: params.mergeFormat,
+      presetOptions: params.presetOptions,
       title: entry.title,
-      site: 'Youtube',
+      site: 'site' in entry ? entry.site : 'Youtube',
       label: entry.title,
       videoInfo: null,
       thumbnail: entry.thumbnail || null,
@@ -2646,82 +3432,85 @@ playlistDownloadBtn.addEventListener('click', async () => {
   });
 
   function updateStatusLine() {
+    const concurrency = Math.min(maxConcurrentDownloads, total);
     const suffix = concurrency > 1 ? window.i18n.t('at_a_time_suffix', { n: concurrency }) : '';
     statusPlaylistEl.textContent = window.i18n.t('downloading_progress', { completed, total, suffix });
     statusPlaylistEl.className = 'status';
   }
   updateStatusLine();
 
-  // Pool de workers: cada uno toma el siguiente video pendiente de la cola compartida
-  // hasta agotarla, de forma que nunca haya más de "concurrency" descargas a la vez.
-  let nextIndex = 0;
-  async function worker() {
-    while (nextIndex < selected.length) {
-      const idx = nextIndex++;
-      const { entry, i } = selected[idx];
+  // Cada video es un trabajo de la cola global. Esta promesa se cumple cuando ya no
+  // queda ninguno de este lote esperando o descargando (los pausados no se esperan).
+  await new Promise((resolveBatch) => {
+    const remaining = new Set(downloadIds);
+    const settle = (id) => {
+      remaining.delete(id);
+      if (remaining.size === 0) resolveBatch();
+    };
+
+    selected.forEach(({ entry, i }, idx) => {
       const downloadId = downloadIds[idx];
-
-      // Si el usuario canceló este video mientras esperaba su turno en la cola, se salta.
-      if (canceledBeforeStart.has(downloadId)) {
-        canceledBeforeStart.delete(downloadId);
-        setPlaylistItemStatus(i, window.i18n.t('playlist_item_cancelled'), 'error');
-        completed++;
-        updateStatusLine();
-        continue;
-      }
-
-      // Si el usuario lo pausó mientras esperaba su turno en la cola, se salta sin
-      // arrancarlo: queda "pausado" (ya reflejado en la UI) hasta que se reanude a mano.
-      if (pausedBeforeStart.has(downloadId)) {
-        pausedBeforeStart.delete(downloadId);
-        setPlaylistItemStatus(i, window.i18n.t('playlist_item_paused'), 'paused');
-        continue;
-      }
-
-      setPlaylistItemStatus(i, window.i18n.t('playlist_item_downloading'), 'downloading');
-      setActiveDownloadStatus(downloadId, 'downloading');
-      try {
-        const result = await window.yoinksAPI.download({
-          url: entry.url,
-          formatId: params.formatId,
-          audioOnly: params.audioOnly || false,
-          audioFormat: params.audioFormat,
-          title: entry.title,
-          site: 'Youtube',
-          label: entry.title,
-          videoInfo: null,
-          thumbnail: entry.thumbnail || null,
-          outputDir,
-          subfolder,
-          downloadId,
-        });
-        if (result && result.paused) {
-          // Se quedó pausado a mitad de la descarga: no cuenta como completado todavía,
-          // el usuario lo reanuda desde el panel de Actividad.
-          setPlaylistItemStatus(i, window.i18n.t('playlist_item_paused'), 'paused');
-          setActiveDownloadStatus(downloadId, 'paused');
-        } else if (result && result.canceled) {
+      enqueueDownloadJob(downloadId, {
+        run: async () => {
+          setPlaylistItemStatus(i, window.i18n.t('playlist_item_downloading'), 'downloading');
+          setActiveDownloadStatus(downloadId, 'downloading');
+          try {
+            const result = await downloadWithAutoRetry(downloadId, {
+              url: entry.url,
+              formatId: params.formatId,
+              audioOnly: params.audioOnly || false,
+              audioFormat: params.audioFormat,
+              audioBitrateKbps: params.audioBitrateKbps,
+              mergeFormat: params.mergeFormat,
+              presetOptions: params.presetOptions,
+              title: entry.title,
+              site: 'site' in entry ? entry.site : 'Youtube',
+              label: entry.title,
+              videoInfo: null,
+              thumbnail: entry.thumbnail || null,
+              outputDir,
+              subfolder,
+            });
+            if (result && result.paused) {
+              // Se quedó pausado a mitad de la descarga: no cuenta como completado todavía,
+              // el usuario lo reanuda desde el panel de Actividad.
+              setPlaylistItemStatus(i, window.i18n.t('playlist_item_paused'), 'paused');
+              setActiveDownloadStatus(downloadId, 'paused');
+            } else if (result && result.canceled) {
+              setPlaylistItemStatus(i, window.i18n.t('playlist_item_cancelled'), 'error');
+              removeActiveDownload(downloadId);
+              completed++;
+            } else {
+              setPlaylistItemStatus(i, window.i18n.t('playlist_item_done'), 'done');
+              finishActiveDownload(downloadId, 'done');
+              ok++;
+              completed++;
+            }
+          } catch (err) {
+            setPlaylistItemStatus(i, 'error', 'error');
+            finishActiveDownload(downloadId, 'error');
+            failed++;
+            completed++;
+          }
+          updateStatusLine();
+          settle(downloadId);
+        },
+        // Cancelado mientras esperaba su turno: no arranca nunca.
+        onCancel: () => {
           setPlaylistItemStatus(i, window.i18n.t('playlist_item_cancelled'), 'error');
-          removeActiveDownload(downloadId);
           completed++;
-        } else {
-          setPlaylistItemStatus(i, window.i18n.t('playlist_item_done'), 'done');
-          finishActiveDownload(downloadId, 'done');
-          ok++;
-          completed++;
-        }
-      } catch (err) {
-        setPlaylistItemStatus(i, 'error', 'error');
-        finishActiveDownload(downloadId, 'error');
-        failed++;
-        completed++;
-      }
-      updateStatusLine();
-    }
-  }
-
-  const workers = Array.from({ length: concurrency }, () => worker());
-  await Promise.all(workers);
+          updateStatusLine();
+          settle(downloadId);
+        },
+        // Pausado mientras esperaba: queda "pausado" hasta que se reanude a mano.
+        onPause: () => {
+          setPlaylistItemStatus(i, window.i18n.t('playlist_item_paused'), 'paused');
+          settle(downloadId);
+        },
+        onResume: () => setPlaylistItemStatus(i, '', ''),
+      });
+    });
+  });
 
   statusPlaylistEl.textContent =
     failed === 0
@@ -2768,15 +3557,35 @@ input.addEventListener('keydown', (e) => {
 });
 
 async function startDownload(opt, extraOptions) {
-  const { extId } = extraOptions || {};
+  const { extId: explicitExtId, trimSection: forcedTrimSection } = extraOptions || {};
+  // Descarga arrancada a mano desde el picker para un link que mandó la
+  // extensión sin calidad: hereda su extId (una sola vez) para que el popup
+  // de la extensión pueda seguir el progreso. Solo si es el mismo link y no
+  // pasó demasiado tiempo.
+  let extId = explicitExtId;
+  if (
+    !extId &&
+    pendingExtensionPickerId &&
+    pendingExtensionPickerId.url === currentUrl &&
+    Date.now() - pendingExtensionPickerId.at < EXTENSION_PICKER_ID_TTL_MS
+  ) {
+    extId = pendingExtensionPickerId.extId;
+    pendingExtensionPickerId = null;
+  }
   const label = opt.isPreset ? opt.res : `${opt.res}`;
 
+  // Si la descarga viene de la extensión con un recorte ya decidido, se usa
+  // ese; si no, el de la sección "Cortar video" de la propia app.
   let trimSection;
-  try {
-    trimSection = resolveTrimSection();
-  } catch (err) {
-    setStatus(err.message, 'error', 'picker');
-    return;
+  if (forcedTrimSection !== undefined) {
+    trimSection = forcedTrimSection;
+  } else {
+    try {
+      trimSection = resolveTrimSection();
+    } catch (err) {
+      setStatus(err.message, 'error', 'picker');
+      return;
+    }
   }
 
   // Soltamos la preview de "Cortar video" (si estaba reproduciendo/buffereando)
@@ -2797,7 +3606,7 @@ async function startDownload(opt, extraOptions) {
     audioBitrateKbps: opt.audioOnly ? opt.audioBitrateKbps : undefined,
     // Tramo a recortar (ver sección "Cortar video"), null si no está activado.
     trimSection,
-    // Contenedor de salida elegido en la columna "Formato" (mp4/mkv/webm/mov).
+    // Contenedor de salida elegido en la columna "Formato" (mp4/mkv/webm).
     // Aplica a filas de video normales y al preajuste "Mejor video y audio
     // disponible" (también editable); se ignora para audio y presets custom.
     mergeFormat: !opt.audioOnly && (!opt.isPreset || opt.isBest) ? opt.ext : undefined,
@@ -2852,7 +3661,7 @@ async function startDownload(opt, extraOptions) {
     }
   } catch (err) {
     if (currentPickerStatusOwner === downloadId) {
-      setStatus(window.i18n.t('download_failed', { error: err.message }), 'error', 'picker');
+      setStatus(window.i18n.t('download_failed', { error: friendlyError(err) }), 'error', 'picker');
     }
     finishActiveDownload(downloadId, 'error');
   } finally {
@@ -2980,6 +3789,38 @@ function closeTerminalScreen() {
   }
 }
 
+// ---- Barra lateral: pestaña "Playlist" ----
+// Abre la última playlist cargada (sin volver a consultarla). Si todavía no se
+// cargó ninguna, vuelve a Inicio con un aviso para pegar el link de una playlist.
+const sidebarPlaylistBtn = document.getElementById('sidebar-playlist');
+if (sidebarPlaylistBtn) {
+  sidebarPlaylistBtn.addEventListener('click', () => {
+    closeAllOverlayPanels();
+    if (playlistEntries.length > 0) {
+      goToPlaylistScreen();
+    } else {
+      goToHomeScreen();
+      setStatus(window.i18n.t('no_playlist_loaded'), '', 'home');
+    }
+  });
+}
+
+// ---- Barra lateral: pestaña "Video" ----
+// Abre el último video individual consultado (selección de formato) sin volver a
+// consultarlo. Si todavía no se cargó ninguno, vuelve a Inicio con un aviso.
+const sidebarVideoBtn = document.getElementById('sidebar-video');
+if (sidebarVideoBtn) {
+  sidebarVideoBtn.addEventListener('click', () => {
+    closeAllOverlayPanels();
+    if (currentVideoInfo) {
+      goToPickerScreen();
+    } else {
+      goToHomeScreen();
+      setStatus(window.i18n.t('no_video_loaded'), '', 'home');
+    }
+  });
+}
+
 // ---- Barra lateral: tarjeta "Terminal" (acceso directo, sin pasar por Configuración) ----
 const sidebarTerminalBtn = document.getElementById('sidebar-terminal');
 if (sidebarTerminalBtn) {
@@ -3003,6 +3844,8 @@ const aboutOverlay = document.getElementById('about-overlay');
 const aboutVersionEl = document.getElementById('about-version');
 const aboutFfmpegVersionEl = document.getElementById('about-ffmpeg-version');
 const aboutDenoVersionEl = document.getElementById('about-deno-version');
+const aboutPotServerVersionEl = document.getElementById('about-pot-server-version');
+const aboutPotPluginVersionEl = document.getElementById('about-pot-plugin-version');
 
 let aboutVersionLoaded = false;
 
@@ -3024,6 +3867,8 @@ function extractShortVersion(raw) {
 async function loadAboutLibraryVersions() {
   aboutFfmpegVersionEl.textContent = window.i18n.t('checking_version');
   aboutDenoVersionEl.textContent = window.i18n.t('checking_version');
+  aboutPotServerVersionEl.textContent = window.i18n.t('checking_version');
+  aboutPotPluginVersionEl.textContent = window.i18n.t('checking_version');
   try {
     const info = await window.yoinksAPI.getUpdateVersions();
 
@@ -3036,9 +3881,15 @@ async function loadAboutLibraryVersions() {
     aboutDenoVersionEl.textContent = denoShort
       ? `v${denoShort}`
       : info.denoVersion || window.i18n.t('auto_downloaded');
+
+    const potShown = info.potProviderVersion ? `v${info.potProviderVersion}` : window.i18n.t('not_installed');
+    aboutPotServerVersionEl.textContent = potShown;
+    aboutPotPluginVersionEl.textContent = potShown;
   } catch {
     aboutFfmpegVersionEl.textContent = window.i18n.t('auto_downloaded');
     aboutDenoVersionEl.textContent = window.i18n.t('auto_downloaded');
+    aboutPotServerVersionEl.textContent = window.i18n.t('auto_downloaded');
+    aboutPotPluginVersionEl.textContent = window.i18n.t('auto_downloaded');
   }
 }
 
@@ -3583,12 +4434,122 @@ async function loadHistoryTab(tab) {
   renderHistoryTab(tab, history);
 }
 
+// Búsqueda del historial: ignora acentos y mayúsculas, y mira título, sitio, enlace, calidad y error.
+function historyEntryMatchesSearch(entry) {
+  const query = normalizeSearchText(historySearchInput.value.trim());
+  if (!query) return true;
+  const haystack = normalizeSearchText([entry.title, entry.site, entry.url, entry.label, entry.error].filter(Boolean).join(' '));
+  return query.split(/\s+/).every((word) => haystack.includes(word));
+}
+
+// Entradas que se ven ahora en una pestaña (estado de la pestaña + búsqueda).
+function getVisibleHistoryEntries(tab, history) {
+  const cfg = HISTORY_TABS[tab];
+  if (!cfg) return [];
+  const byTab = cfg.filter ? history.filter((entry) => entry.status === cfg.filter) : history;
+  return byTab.filter(historyEntryMatchesSearch);
+}
+
+historySearchInput.addEventListener('input', () => {
+  if (HISTORY_TABS[activeActivityTab]) loadHistoryTab(activeActivityTab);
+});
+
+historyExportBtn.addEventListener('click', async () => {
+  let history = [];
+  try {
+    history = (await window.yoinksAPI.listHistory()) || [];
+  } catch (e) {
+    history = [];
+  }
+  const entries = getVisibleHistoryEntries(activeActivityTab, history);
+  if (!entries.length) return;
+  try {
+    await window.yoinksAPI.exportHistory(entries.map((e) => ({
+      date: e.date || '',
+      status: e.status || '',
+      title: e.title || '',
+      url: e.url || '',
+      site: e.site || '',
+      label: e.label || '',
+      path: e.path || '',
+      error: e.error || '',
+    })));
+  } catch (e) {
+    // cancelar el diálogo o no poder escribir el archivo no requiere aviso
+  }
+});
+
 function renderHistoryTab(tab, history) {
   const cfg = HISTORY_TABS[tab];
   if (!cfg) return;
-  const filtered = cfg.filter ? history.filter((entry) => entry.status === cfg.filter) : history;
+  const filtered = getVisibleHistoryEntries(tab, history);
   renderHistoryList(cfg.listEl, cfg.emptyEl, filtered);
+  if (tab === 'error') {
+    errorToolbarEl.classList.toggle('hidden', !filtered.some(isRetryableHistoryEntry));
+  }
 }
+
+// ================= REINTENTAR DESCARGAS CON ERROR =================
+// Las entradas de error guardan (entry.retry) lo necesario para repetir la descarga igual:
+// misma calidad, formato y carpeta. Las entradas antiguas sin eso solo tienen "volver a descargar".
+function isRetryableHistoryEntry(entry) {
+  return !!(entry && entry.status === 'error' && entry.retry && entry.retry.url);
+}
+
+// Pone una descarga con error de nuevo en la cola global (respeta simultáneas y orden).
+// La entrada vieja se quita del historial: si vuelve a fallar, se registra una nueva.
+async function requeueFailedDownload(entry) {
+  const payload = { ...entry.retry, videoInfo: null };
+  const downloadId = queueActiveDownload(
+    entry.title || payload.title,
+    payload.label || entry.label || '',
+    payload,
+    entry.thumbnail || payload.thumbnail
+  );
+  enqueueDownloadJob(downloadId, {
+    run: async () => {
+      setActiveDownloadStatus(downloadId, 'downloading');
+      try {
+        const result = await downloadWithAutoRetry(downloadId, payload);
+        if (result && result.paused) setActiveDownloadStatus(downloadId, 'paused');
+        else if (result && result.canceled) removeActiveDownload(downloadId);
+        else finishActiveDownload(downloadId, 'done');
+      } catch (err) {
+        finishActiveDownload(downloadId, 'error');
+      }
+    },
+  });
+  let updated = null;
+  try {
+    updated = await window.yoinksAPI.deleteHistoryItem(entry.id);
+  } catch (e) {
+    updated = null;
+  }
+  return updated;
+}
+
+async function retryFailedEntries(entries) {
+  await refreshQueueSettings();
+  let updated = null;
+  for (const entry of entries) {
+    const result = await requeueFailedDownload(entry);
+    if (result) updated = result;
+  }
+  if (updated) renderAllHistoryTabs(updated);
+  setActivityTab('downloads');
+}
+
+errorRetryAllBtn.addEventListener('click', async () => {
+  let history = [];
+  try {
+    history = (await window.yoinksAPI.listHistory()) || [];
+  } catch (e) {
+    history = [];
+  }
+  // Respeta la búsqueda activa: reintenta solo los errores que se están viendo.
+  const entries = getVisibleHistoryEntries('error', history).filter(isRetryableHistoryEntry);
+  if (entries.length) await retryFailedEntries(entries);
+});
 
 // Vuelve a pintar todas las pestañas de historial a la vez a partir del mismo
 // array (evita 4 llamadas IPC cuando ya se tiene el historial actualizado a
@@ -3622,15 +4583,20 @@ function renderHistoryList(listEl, emptyEl, history) {
           .join('<span class="sep">·</span>')}
           <span class="history-badge ${badgeClass}">${badgeText}</span>
         </div>
-        ${entry.status === 'error' ? `<div class="history-item-error">${escapeHtml(entry.error || '')}</div>` : ''}
+        ${entry.status === 'error' ? `<div class="history-item-error">${escapeHtml(entry.error ? friendlyError(entry.error) : '')}</div>` : ''}
       </div>
       <div class="history-item-actions">
         ${entry.status === 'success' ? `<button class="history-open">${window.i18n.t('btn_open')}</button>` : ''}
+        ${isRetryableHistoryEntry(entry) ? `<button class="history-retry" title="${window.i18n.t('tt_retry')}">${window.i18n.t('btn_retry')}</button>` : ''}
         ${entry.url ? `<button class="history-redownload">${window.i18n.t('btn_redownload')}</button>` : ''}
         ${entry.status === 'success' ? `<button class="history-open-folder">${window.i18n.t('btn_open_folder')}</button>` : ''}
         <button class="history-delete">${window.i18n.t('btn_delete')}</button>
       </div>
     `;
+
+    if (isRetryableHistoryEntry(entry)) {
+      row.querySelector('.history-retry').addEventListener('click', () => retryFailedEntries([entry]));
+    }
 
     if (entry.url) {
       row.querySelector('.history-redownload').addEventListener('click', () => {
@@ -3682,11 +4648,127 @@ const pausedBeforeStart = new Set();
 // IDs marcados con el checkbox de cada fila, para las acciones "seleccionados".
 const selectedDownloadIds = new Set();
 
+// ================= COLA GLOBAL DE DESCARGAS =================
+// Todas las descargas "en cola" (videos de una playlist, reintentos...) esperan aquí.
+// Se arrancan en el orden en que aparecen en activeDownloads (por eso reordenar la
+// lista en el panel reordena la cola) y nunca hay más de maxConcurrentDownloads
+// corriendo a la vez. Ese límite se puede cambiar en vivo: pumpDownloadQueue() se
+// vuelve a ejecutar y arranca más (o deja terminar las que sobran) sin reiniciar nada.
+let maxConcurrentDownloads = 1;
+let autoRetryCount = 1; // reintentos automáticos ante un error (Ajustes de descarga)
+let queueRunningCount = 0;
+// downloadId -> { run, onCancel, onPause, onResume } de las descargas que esperan turno.
+const queueJobs = new Map();
+
+function clampConcurrent(value) {
+  const n = parseInt(value, 10);
+  return Number.isFinite(n) ? Math.min(8, Math.max(1, n)) : 1;
+}
+
+function pumpDownloadQueue() {
+  while (queueRunningCount < maxConcurrentDownloads) {
+    const next = activeDownloads.find((d) => d.status === 'queued' && queueJobs.has(d.id));
+    if (!next) break;
+    const job = queueJobs.get(next.id);
+    queueJobs.delete(next.id);
+    queueRunningCount++;
+    Promise.resolve()
+      .then(() => job.run())
+      .catch((err) => console.error('[cola de descargas]', err))
+      .finally(() => {
+        queueRunningCount--;
+        pumpDownloadQueue();
+      });
+  }
+}
+
+function enqueueDownloadJob(downloadId, job) {
+  queueJobs.set(downloadId, job);
+  pumpDownloadQueue();
+}
+
+// Lee de Ajustes los valores que usa la cola (descargas simultáneas y reintentos).
+async function refreshQueueSettings() {
+  try {
+    const settings = await window.yoinksAPI.getSettings();
+    maxConcurrentDownloads = clampConcurrent(settings.concurrentDownloads);
+    const retries = parseInt(settings.autoRetries, 10);
+    autoRetryCount = Number.isFinite(retries) ? Math.min(5, Math.max(0, retries)) : 1;
+    if (queueRateInput && document.activeElement !== queueRateInput) queueRateInput.value = settings.rateLimit || '';
+  } catch (e) {
+    // se mantienen los valores actuales
+  }
+  if (queueConcurrentSelect) queueConcurrentSelect.value = String(maxConcurrentDownloads);
+  return maxConcurrentDownloads;
+}
+
+// Guarda un cambio hecho desde los controles del panel sin pisar el resto de Ajustes.
+async function saveQueueSetting(patch) {
+  try {
+    const current = await window.yoinksAPI.getSettings();
+    await window.yoinksAPI.saveSettings({ ...current, ...patch });
+  } catch (e) {
+    // si no se pudo guardar, el valor en pantalla se corrige abajo con refreshQueueSettings()
+  }
+  await refreshQueueSettings();
+}
+
+// Simultáneas: se aplica en vivo (arranca más descargas de la cola o deja terminar las que sobran).
+queueConcurrentSelect.addEventListener('change', async () => {
+  maxConcurrentDownloads = clampConcurrent(queueConcurrentSelect.value);
+  pumpDownloadQueue();
+  await saveQueueSetting({ concurrentDownloads: maxConcurrentDownloads });
+  pumpDownloadQueue();
+});
+
+// Límite de velocidad: yt-dlp no deja cambiarlo en un proceso que ya corre, así que
+// aplica a las descargas que arranquen desde ahora. Vacío = sin límite.
+const RATE_LIMIT_RE = /^\d+(\.\d+)?\s*[KkMmGg]?$/;
+async function commitQueueRateLimit() {
+  const value = queueRateInput.value.trim().replace(/\s+/g, '');
+  if (value !== '' && !RATE_LIMIT_RE.test(value)) {
+    await refreshQueueSettings(); // valor inválido: se vuelve al que estaba guardado
+    return;
+  }
+  queueRateInput.value = value;
+  await saveQueueSetting({ rateLimit: value });
+}
+queueRateInput.addEventListener('change', commitQueueRateLimit);
+queueRateInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') queueRateInput.blur();
+});
+
+// Acción única al terminar toda la cola (no se guarda: cada vez arranca en "no hacer nada").
+let queueAfterAction = 'none';
+queueAfterSelect.addEventListener('change', () => {
+  queueAfterAction = ['sleep', 'shutdown'].includes(queueAfterSelect.value) ? queueAfterSelect.value : 'none';
+});
+
+// Mueve una descarga en cola a otra posición de la lista (y por tanto de la cola).
+// beforeId = null la deja al final.
+function moveQueuedDownload(id, beforeId) {
+  const from = activeDownloads.findIndex((x) => x.id === id);
+  if (from === -1 || id === beforeId) return;
+  const [item] = activeDownloads.splice(from, 1);
+  let to = beforeId == null ? -1 : activeDownloads.findIndex((x) => x.id === beforeId);
+  if (to === -1) activeDownloads.push(item);
+  else activeDownloads.splice(to, 0, item);
+  renderDownloadsPanel();
+}
+
+function moveQueuedDownloadToFront(id) {
+  const first = activeDownloads.find((x) => x.status === 'queued' && x.id !== id);
+  if (first) moveQueuedDownload(id, first.id);
+}
+
+refreshQueueSettings();
+
 function isSelectableDownload(d) {
   return d.status === 'queued' || d.status === 'downloading' || d.status === 'paused';
 }
 
 function queueActiveDownload(title, label, payload, thumbnail, extId) {
+  cancelPowerCountdown(); // una descarga nueva cancela una suspensión/apagado pendiente
   const id = ++downloadIdCounter;
   activeDownloads.push({
     id,
@@ -3709,6 +4791,43 @@ function queueActiveDownload(title, label, payload, thumbnail, extId) {
   });
   renderDownloadsPanel();
   return id;
+}
+
+// Errores que no se arreglan reintentando (video privado, eliminado, bloqueo por país...).
+const NON_RETRYABLE_ERROR_RE =
+  /privad|private|no est[aá] disponible|not available|unavailable|eliminad|removed|copyright|terminated|sign in|iniciar sesi|members|geo|country|age-restricted|confirm your age/i;
+
+// Descarga con reintentos automáticos: si falla por algo que puede ser pasajero (red,
+// 5xx...), espera un poco y vuelve a intentarlo hasta autoRetryCount veces. Los intentos
+// intermedios no se anotan como "error" en el historial (silentError); solo el último.
+async function downloadWithAutoRetry(downloadId, requestPayload) {
+  let attempt = 0;
+  for (;;) {
+    const attemptsLeft = autoRetryCount - attempt;
+    try {
+      return await window.yoinksAPI.download({ ...requestPayload, downloadId, silentError: attemptsLeft > 0 });
+    } catch (err) {
+      const stillThere = () => activeDownloads.some((d) => d.id === downloadId);
+      const message = (err && err.message) || '';
+      if (attemptsLeft <= 0 || !stillThere() || NON_RETRYABLE_ERROR_RE.test(message)) {
+        if (attemptsLeft > 0) {
+          // Se había pedido silencio pero ya no se reintenta: anota el error en el historial.
+          try { await window.yoinksAPI.recordDownloadError({ ...requestPayload, error: message }); } catch (e) {}
+        }
+        throw err;
+      }
+      attempt++;
+      const d = activeDownloads.find((x) => x.id === downloadId);
+      if (d) {
+        d.percent = 0;
+        d.speed = null;
+        d.eta = null;
+      }
+      renderDownloadsPanel();
+      await sleep(2000 * attempt);
+      if (!stillThere()) throw err;
+    }
+  }
 }
 
 function setActiveDownloadStatus(id, status) {
@@ -3824,29 +4943,52 @@ function formatBytesPerSec(bytes) {
 // no tener que sumar a ojo cada fila individual.
 function updateDownloadsSpeedSummary() {
   if (!downloadsSpeedSummaryEl) return;
+  const t = (key, params) => window.i18n.t(key, params);
   const downloading = activeDownloads.filter((d) => d.status === 'downloading');
+  const queued = activeDownloads.filter((d) => d.status === 'queued');
+  const paused = activeDownloads.filter((d) => d.status === 'paused');
+  const total = downloading.length + queued.length + paused.length;
+
+  // Partes del resumen, separadas por " · ": activas, en cola, pausadas, total y
+  // velocidad combinada. Las que valen 0 no se muestran.
+  const parts = [];
 
   if (!downloading.length) {
-    // Antes se ocultaba del todo; ahora queda siempre visible (permanente)
-    // para que la barra no aparezca/desaparezca y el resto del panel no
-    // salte de posición cada vez que arranca o termina una descarga.
-    downloadsSpeedSummaryTextEl.textContent = window.i18n.t('downloads_speed_summary_none');
-    downloadsSpeedSummaryEl.classList.remove('hidden');
-    return;
+    parts.push(escapeHtml(t('downloads_speed_summary_none')));
+  } else {
+    parts.push(
+      escapeHtml(
+        downloading.length === 1
+          ? t('downloads_speed_summary_one')
+          : t('downloads_speed_summary_many', { n: downloading.length })
+      )
+    );
   }
 
-  const totalBytes = downloading.reduce((sum, d) => sum + parseSpeedToBytesPerSec(d.speed), 0);
-  const totalSpeedText = formatBytesPerSec(totalBytes);
+  if (queued.length) parts.push(escapeHtml(t('downloads_summary_queued', { n: queued.length })));
+  if (paused.length) {
+    parts.push(
+      escapeHtml(
+        paused.length === 1
+          ? t('downloads_summary_paused_one')
+          : t('downloads_summary_paused_many', { n: paused.length })
+      )
+    );
+  }
 
-  const countLabel =
-    downloading.length === 1
-      ? window.i18n.t('downloads_speed_summary_one')
-      : window.i18n.t('downloads_speed_summary_many', { n: downloading.length });
+  // El total solo aporta cuando hay más de un estado o más de una descarga.
+  if (total > 1 && total !== downloading.length) {
+    parts.push(escapeHtml(t('downloads_summary_total', { n: total })));
+  }
 
-  downloadsSpeedSummaryTextEl.innerHTML = totalSpeedText
-    ? `${countLabel} · <strong>${escapeHtml(totalSpeedText)}</strong>`
-    : countLabel;
+  if (downloading.length) {
+    const totalBytes = downloading.reduce((sum, d) => sum + parseSpeedToBytesPerSec(d.speed), 0);
+    const totalSpeedText = formatBytesPerSec(totalBytes);
+    if (totalSpeedText) parts.push(`<strong>${escapeHtml(totalSpeedText)}</strong>`);
+  }
 
+  // Siempre visible (permanente) para que el panel no salte de posición.
+  downloadsSpeedSummaryTextEl.innerHTML = parts.join(' · ');
   downloadsSpeedSummaryEl.classList.remove('hidden');
 }
 
@@ -3854,6 +4996,8 @@ function removeActiveDownload(id) {
   activeDownloads = activeDownloads.filter((x) => x.id !== id);
   selectedDownloadIds.delete(id);
   renderDownloadsPanel();
+  // Si se canceló lo último que faltaba de un lote, la cola también terminó.
+  checkQueueDrained();
 }
 
 // Marca la descarga como terminada (lista/error) y la quita de la lista
@@ -3865,10 +5009,97 @@ function finishActiveDownload(id, status) {
     d.percent = 100;
   }
   renderDownloadsPanel();
-  if (status === 'done') playNotificationSoundIfEnabled('success');
-  else if (status === 'error') playNotificationSoundIfEnabled('error');
+  // El sonido, la notificación y la acción final se resuelven una sola vez, cuando ya
+  // no queda nada en cola ni descargando (ver checkQueueDrained más abajo).
+  if (status === 'done') queueBatch.ok++;
+  else if (status === 'error') queueBatch.failed++;
+  checkQueueDrained();
   setTimeout(() => removeActiveDownload(id), 2500);
 }
+
+// ================= AL TERMINAR LA COLA =================
+// Cuenta lo que terminó desde la última vez que la cola quedó vacía.
+const queueBatch = { ok: 0, failed: 0 };
+
+function checkQueueDrained() {
+  if (queueBatch.ok + queueBatch.failed === 0) return;
+  // En cola o descargando = la cola sigue viva (los pausados no la mantienen abierta).
+  if (activeDownloads.some((d) => d.status === 'queued' || d.status === 'downloading')) return;
+  const { ok, failed } = queueBatch;
+  queueBatch.ok = 0;
+  queueBatch.failed = 0;
+  onQueueDrained(ok, failed);
+}
+
+async function onQueueDrained(ok, failed) {
+  // Un solo sonido para todo el lote: de éxito si algo se descargó, de error si todo falló.
+  playNotificationSoundIfEnabled(ok > 0 ? 'success' : 'error');
+
+  let settings = {};
+  try {
+    settings = (await window.yoinksAPI.getSettings()) || {};
+  } catch (e) {
+    settings = {};
+  }
+
+  if (ok + failed >= 2 && settings.notifyOnQueueFinish !== false && window.yoinksAPI.showNotification) {
+    try {
+      window.yoinksAPI.showNotification({
+        title: window.i18n.t('notif_queue_title'),
+        body: failed === 0
+          ? window.i18n.t('notif_queue_body_ok', { ok })
+          : window.i18n.t('notif_queue_body_errors', { ok, failed }),
+      });
+    } catch (e) {
+      // la notificación es opcional
+    }
+  }
+
+  // Suspender/apagar solo si no quedó nada pausado esperando (el usuario sigue con trabajo pendiente).
+  const action = queueAfterAction;
+  if (action !== 'none' && !activeDownloads.some((d) => d.status === 'paused')) {
+    queueAfterAction = 'none';
+    queueAfterSelect.value = 'none';
+    startPowerCountdown(action);
+  }
+}
+
+// Cuenta regresiva cancelable antes de suspender/apagar, para no sorprender al usuario.
+const POWER_COUNTDOWN_SECONDS = 30;
+let powerCountdownTimer = null;
+
+function cancelPowerCountdown() {
+  if (powerCountdownTimer) {
+    clearInterval(powerCountdownTimer);
+    powerCountdownTimer = null;
+  }
+  powerCountdownEl.classList.add('hidden');
+}
+
+function startPowerCountdown(action) {
+  cancelPowerCountdown();
+  let left = POWER_COUNTDOWN_SECONDS;
+  const key = action === 'shutdown' ? 'power_countdown_shutdown' : 'power_countdown_sleep';
+  const paint = () => {
+    powerCountdownTextEl.textContent = window.i18n.t(key, { n: left });
+  };
+  paint();
+  powerCountdownEl.classList.remove('hidden');
+  powerCountdownTimer = setInterval(() => {
+    left--;
+    if (left <= 0) {
+      cancelPowerCountdown();
+      try {
+        window.yoinksAPI.powerAction(action);
+      } catch (e) {
+        // sin permisos para suspender/apagar: no hay nada más que hacer
+      }
+      return;
+    }
+    paint();
+  }, 1000);
+}
+powerCountdownCancelBtn.addEventListener('click', cancelPowerCountdown);
 
 // ================= SONIDO DE NOTIFICACIÓN =================
 // Se reproduce al terminar una descarga (con éxito o con error) y al
@@ -3969,6 +5200,30 @@ window.yoinksAPI.onProgress((data) => {
   if (cb) cb(data.percent);
 });
 
+// La extensión del navegador pidió reanudar una descarga que había pausado.
+// Se reanuda con resumeActiveDownload(), el mismo camino que el botón
+// "Reanudar" de esta ventana: así la fila pasa a "descargando", y al terminar
+// (o pausar/cancelar de nuevo) el resultado llega a esta ventana en vez de
+// perderse. Si la fila ya está "descargando" (pedido repetido) no se hace
+// nada pero se responde handled=true para que main.js no lance otro yt-dlp.
+if (window.yoinksAPI.onResumeExtensionDownload) {
+  window.yoinksAPI.onResumeExtensionDownload((extId) => {
+    const d = activeDownloads.find((x) => x.extId === extId && (x.status === 'paused' || x.status === 'downloading'));
+    window.yoinksAPI.ackExtensionResume(extId, !!d);
+    if (d && d.status === 'paused') resumeActiveDownload(d.id);
+  });
+}
+
+// La extensión canceló una descarga que estaba pausada o en cola: se quita la
+// fila con cancelActiveDownload(), el mismo camino que el botón "Cancelar" de
+// esta ventana (que además deja la extensión en "cancelled").
+if (window.yoinksAPI.onCancelExtensionDownload) {
+  window.yoinksAPI.onCancelExtensionDownload((extId) => {
+    const d = activeDownloads.find((x) => x.extId === extId && (x.status === 'paused' || x.status === 'queued'));
+    if (d) cancelActiveDownload(d.id);
+  });
+}
+
 function getDownloadStatusLabel(status) {
   const map = {
     queued: 'status_queued',
@@ -3989,6 +5244,8 @@ function pauseActiveDownload(id) {
     // para que el worker no lo empiece, y refleja "pausado" en la UI de inmediato.
     pausedBeforeStart.add(id);
     setActiveDownloadStatus(id, 'paused');
+    const queuedJob = queueJobs.get(id);
+    if (queuedJob && queuedJob.onPause) queuedJob.onPause();
     // No hay ningún proceso de yt-dlp corriendo todavía, así que nada del lado
     // de main.js se va a enterar de este cambio por su cuenta (ver
     // reportExt() en performDownload, que solo dispara al cerrarse un
@@ -4011,6 +5268,9 @@ function cancelActiveDownload(id) {
     // Todavía no arrancó (esperando su turno en el pool de la playlist):
     // márcalo para que el worker lo salte cuando le toque, y quítalo ya de la lista.
     canceledBeforeStart.add(id);
+    const queuedJob = queueJobs.get(id);
+    queueJobs.delete(id);
+    if (queuedJob && queuedJob.onCancel) queuedJob.onCancel();
     // Mismo caso que en pauseActiveDownload de arriba: sin proceso que se
     // cierre, reportExt() nunca se llama solo. Avisamos a mano para que la
     // extensión (si esta descarga vino de ahí) saque su tarjeta de la lista
@@ -4022,6 +5282,10 @@ function cancelActiveDownload(id) {
     return;
   }
   if (d.status === 'paused') {
+    // Si estaba pausada antes de arrancar (sin proceso), se descarta su trabajo en la cola.
+    const pausedJob = queueJobs.get(id);
+    queueJobs.delete(id);
+    if (pausedJob && pausedJob.onCancel) pausedJob.onCancel();
     // Ya no hay proceso corriendo (se mató al pausar), así que no hay nada que
     // señalizar en el proceso principal: simplemente se quita de la lista.
     // Mismo aviso a mano que arriba: al pausar ya se le había avisado a la
@@ -4039,6 +5303,16 @@ function cancelActiveDownload(id) {
 async function resumeActiveDownload(id) {
   const d = activeDownloads.find((x) => x.id === id);
   if (!d || !d.payload) return;
+  // Pausada antes de arrancar (nunca tuvo proceso): vuelve a la cola en su lugar y
+  // espera su turno respetando el límite de descargas simultáneas.
+  const waitingJob = queueJobs.get(id);
+  if (waitingJob) {
+    pausedBeforeStart.delete(id);
+    if (waitingJob.onResume) waitingJob.onResume();
+    setActiveDownloadStatus(id, 'queued');
+    pumpDownloadQueue();
+    return;
+  }
   setActiveDownloadStatus(id, 'downloading');
   try {
     // Se manda extId también acá (no solo la primera vez en startDownload):
@@ -4047,7 +5321,9 @@ async function resumeActiveDownload(id) {
     // el popup — quedaría de nuevo "pegada" en el último estado que la
     // extensión llegó a ver antes de pausarse, en vez de reflejar que
     // arrancó de nuevo.
-    const result = await window.yoinksAPI.download({ ...d.payload, downloadId: id, extId: d.extId || null });
+    // resume: true -> main.js usa --continue en vez de --force-overwrites (que
+    // implica --no-continue y hacía volver a empezar desde 0% al reanudar).
+    const result = await window.yoinksAPI.download({ ...d.payload, downloadId: id, extId: d.extId || null, resume: true });
     if (result && result.paused) {
       setActiveDownloadStatus(id, 'paused');
     } else if (result && result.canceled) {
@@ -4136,7 +5412,22 @@ downloadsCancelBtn.addEventListener('click', () => {
   }
 });
 
+// Reordenar la cola arrastrando: mientras se arrastra no se repinta la lista (borraría la
+// fila que se está moviendo); el repintado pendiente se hace al soltar.
+let dragDownloadId = null;
+let renderDeferredByDrag = false;
+
+function clearDropIndicators() {
+  downloadsListEl.querySelectorAll('.drop-before, .drop-after, .dragging').forEach((el) => {
+    el.classList.remove('drop-before', 'drop-after', 'dragging');
+  });
+}
+
 function renderDownloadsPanel() {
+  if (dragDownloadId !== null) {
+    renderDeferredByDrag = true;
+    return;
+  }
   downloadsBadge.textContent = String(activeDownloads.length);
   downloadsBadge.classList.toggle('hidden', activeDownloads.length === 0);
 
@@ -4208,12 +5499,16 @@ function renderDownloadsPanel() {
     if (d.status === 'downloading' || d.status === 'queued') {
       actionButtons.push(`<button class="active-dl-pause" title="${window.i18n.t('tt_pause')}">${window.i18n.t('btn_pause')}</button>`);
     }
+    if (d.status === 'queued') {
+      actionButtons.push(`<button class="active-dl-first" title="${window.i18n.t('tt_move_first')}">⤒</button>`);
+    }
     if (d.status === 'paused') actionButtons.push(`<button class="active-dl-resume" title="${window.i18n.t('tt_resume')}">${window.i18n.t('btn_resume')}</button>`);
     if (d.status === 'queued' || d.status === 'downloading' || d.status === 'paused') {
       actionButtons.push(`<button class="active-dl-cancel" title="${window.i18n.t('tt_cancel')}">${window.i18n.t('btn_cancel_download')}</button>`);
     }
 
     row.innerHTML = `
+      ${d.status === 'queued' ? `<span class="active-dl-handle" title="${window.i18n.t('tt_drag_reorder')}">⠿</span>` : '<span class="active-dl-handle"></span>'}
       ${selectable ? `<input type="checkbox" class="active-dl-select" ${isChecked ? 'checked' : ''} title="${window.i18n.t('tt_select')}" />` : '<span class="active-dl-select-spacer"></span>'}
       ${d.thumbnail ? `<img class="history-item-thumb" src="${escapeHtml(d.thumbnail)}" alt="" onerror="this.remove()" />` : ''}
       <div class="history-item-main">
@@ -4253,6 +5548,58 @@ function renderDownloadsPanel() {
     const cancelBtn = row.querySelector('.active-dl-cancel');
     if (cancelBtn) cancelBtn.addEventListener('click', () => cancelActiveDownload(d.id));
 
+    const firstBtn = row.querySelector('.active-dl-first');
+    if (firstBtn) firstBtn.addEventListener('click', () => moveQueuedDownloadToFront(d.id));
+
+    // Arrastrar para reordenar: solo las descargas en cola se pueden mover, y solo se
+    // pueden soltar sobre otras descargas en cola.
+    if (d.status === 'queued') {
+      row.classList.add('queued-draggable');
+      row.draggable = true;
+      row.addEventListener('dragstart', (e) => {
+        dragDownloadId = d.id;
+        row.classList.add('dragging');
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', String(d.id));
+      });
+      row.addEventListener('dragend', () => {
+        dragDownloadId = null;
+        clearDropIndicators();
+        if (renderDeferredByDrag) {
+          renderDeferredByDrag = false;
+          renderDownloadsPanel();
+        }
+      });
+      const isLowerHalf = (e) => {
+        const rect = row.getBoundingClientRect();
+        return e.clientY > rect.top + rect.height / 2;
+      };
+      row.addEventListener('dragover', (e) => {
+        if (dragDownloadId === null || dragDownloadId === d.id) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        const after = isLowerHalf(e);
+        row.classList.toggle('drop-before', !after);
+        row.classList.toggle('drop-after', after);
+      });
+      row.addEventListener('dragleave', () => row.classList.remove('drop-before', 'drop-after'));
+      row.addEventListener('drop', (e) => {
+        if (dragDownloadId === null) return;
+        e.preventDefault();
+        const movingId = dragDownloadId;
+        const after = isLowerHalf(e);
+        dragDownloadId = null;
+        renderDeferredByDrag = false;
+        let beforeId = d.id;
+        if (after) {
+          const idx = activeDownloads.findIndex((x) => x.id === d.id);
+          const next = activeDownloads[idx + 1];
+          beforeId = next ? next.id : null;
+        }
+        moveQueuedDownload(movingId, beforeId);
+      });
+    }
+
     downloadsListEl.appendChild(row);
   });
 }
@@ -4279,6 +5626,7 @@ function setActivityTab(tab) {
     tabBtn.classList.toggle('active', isActive);
     panelEl.classList.toggle('hidden', !isActive);
   });
+  historySearchBarEl.classList.toggle('hidden', tab === 'downloads');
   if (tab !== 'downloads') loadHistoryTab(tab);
 }
 
@@ -4465,8 +5813,10 @@ function updateApploginOptionAvailability() {
   const applyOption = settingCookiesModeSelect.querySelector('option[value="applogin"]');
   if (!applyOption) return;
   const site = settingCookiesSiteSelect.value;
-  const noAppLogin = site === 'other' || customCookieSites.some((s) => s.id === site);
+  // YouTube tampoco ofrece esta opción (se usa "Desde navegador" o "Desde archivo").
+  const noAppLogin = site === 'youtube' || site === 'other' || customCookieSites.some((s) => s.id === site);
   applyOption.disabled = noAppLogin;
+  applyOption.hidden = noAppLogin;
   if (noAppLogin && settingCookiesModeSelect.value === 'applogin') {
     settingCookiesModeSelect.value = 'none';
   }
@@ -4631,6 +5981,9 @@ function applyDownloadSettingsToForm(settings) {
   settingRateLimitInput.value = settings.rateLimit || '';
   settingRateLimitModeSelect.value = settings.rateLimitMode === 'total' ? 'total' : 'perFile';
   settingConcurrentDownloadsSelect.value = String(settings.concurrentDownloads || 1);
+  const retriesValue = parseInt(settings.autoRetries, 10);
+  settingAutoRetriesSelect.value = String(Number.isFinite(retriesValue) ? Math.min(5, Math.max(0, retriesValue)) : 1);
+  settingNotifyQueueFinishCheckbox.checked = settings.notifyOnQueueFinish !== false;
   settingConcurrentFragmentsInput.value = String(settings.concurrentFragments || 1);
 
   // Subtítulos/capítulos son opt-in (default apagado); miniaturas mantiene el
@@ -4694,6 +6047,8 @@ downloadSettingsSaveBtn.addEventListener('click', async () => {
   }
 
   const settings = {
+    // Todo lo que no se edita en este formulario (idioma, sonido, canal de yt-dlp...) se conserva tal cual.
+    ...current,
     downloadPath: settingDownloadPathInput.value.trim(),
     outputTemplate: settingOutputTemplateInput.value.trim() || '%(title).200B - %(uploader).30B.%(ext)s',
     organizeBySite: settingOrganizeBySiteCheckbox.checked,
@@ -4701,6 +6056,8 @@ downloadSettingsSaveBtn.addEventListener('click', async () => {
     rateLimit: settingRateLimitInput.value.trim(),
     rateLimitMode: settingRateLimitModeSelect.value === 'total' ? 'total' : 'perFile',
     concurrentDownloads: parseInt(settingConcurrentDownloadsSelect.value, 10) || 1,
+    autoRetries: Math.min(5, Math.max(0, parseInt(settingAutoRetriesSelect.value, 10) || 0)),
+    notifyOnQueueFinish: settingNotifyQueueFinishCheckbox.checked,
     concurrentFragments: Math.min(16, Math.max(1, parseInt(settingConcurrentFragmentsInput.value, 10) || 1)),
     subtitlesEnabled: settingSubtitlesEnabledCheckbox.checked,
     subtitleLangs: settingSubtitleLangsInput.value.trim(),
@@ -4716,15 +6073,39 @@ downloadSettingsSaveBtn.addEventListener('click', async () => {
   try {
     const saved = await window.yoinksAPI.saveSettings(settings);
     applyDownloadSettingsToForm(saved);
+    await refreshQueueSettings(); // la cola toma de inmediato las simultáneas/reintentos nuevos
+    pumpDownloadQueue();
   } catch (e) {
     // si falla el guardado, dejamos el panel abierto para que el usuario reintente
   }
+});
+
+// Botones que insertan un marcador ({canal}, {titulo}...) en la plantilla, donde esté el cursor.
+document.getElementById('template-chips').addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-token]');
+  if (!btn) return;
+  const token = btn.dataset.token;
+  const el = settingOutputTemplateInput;
+  const start = el.selectionStart ?? el.value.length;
+  const end = el.selectionEnd ?? el.value.length;
+  // Si la plantilla es la de yt-dlp por defecto, el primer marcador la reemplaza en vez de mezclarse.
+  const isDefault = el.value.trim() === '%(title).200B - %(uploader).30B.%(ext)s';
+  if (isDefault) {
+    el.value = token;
+  } else {
+    el.value = el.value.slice(0, start) + token + el.value.slice(end);
+  }
+  const pos = isDefault ? token.length : start + token.length;
+  el.focus();
+  el.setSelectionRange(pos, pos);
 });
 
 downloadSettingsResetBtn.addEventListener('click', async () => {
   try {
     const defaults = await window.yoinksAPI.resetSettings();
     applyDownloadSettingsToForm(defaults);
+    await refreshQueueSettings();
+    pumpDownloadQueue();
   } catch (e) {
     // no hacer nada si falla el restablecimiento
   }
@@ -4748,6 +6129,7 @@ function applyGeneralSettingsToForm(settings) {
   settingCloseBehaviorSelect.value = ['ask', 'minimize', 'close'].includes(settings.closeBehavior) ? settings.closeBehavior : 'ask';
   settingLanguageSelect.value = settings.language === 'en' ? 'en' : 'es';
   settingExtensionKeepInBackgroundCheckbox.checked = settings.extensionKeepInBackground === true;
+  settingClipboardWatchCheckbox.checked = settings.clipboardWatch !== false;
 }
 
 function openGeneralPanel() {
@@ -4778,6 +6160,7 @@ generalSaveBtn.addEventListener('click', async () => {
       closeBehavior: settingCloseBehaviorSelect.value,
       language: settingLanguageSelect.value,
       extensionKeepInBackground: settingExtensionKeepInBackgroundCheckbox.checked,
+      clipboardWatch: settingClipboardWatchCheckbox.checked,
     });
     applyGeneralSettingsToForm(saved);
     applyLanguage(saved.language === 'en' ? 'en' : 'es');
@@ -4790,7 +6173,7 @@ generalSaveBtn.addEventListener('click', async () => {
 generalResetBtn.addEventListener('click', () => {
   // Restablece solo el formulario en pantalla a los valores por defecto;
   // hay que presionar "Guardar" para que quede persistido.
-  applyGeneralSettingsToForm({ soundEnabled: true, soundStyle: 'chime', closeBehavior: 'ask', language: 'es', extensionKeepInBackground: false });
+  applyGeneralSettingsToForm({ soundEnabled: true, soundStyle: 'chime', closeBehavior: 'ask', language: 'es', extensionKeepInBackground: false, clipboardWatch: true });
 });
 
 // El toggle "Mantener en segundo plano" cambió desde las Opciones de la
@@ -4884,10 +6267,16 @@ function setUpdatesStatus(text, type = '') {
   updatesStatusEl.className = 'settings-hint' + (type ? ' ' + type : '');
 }
 
+// Elementos de la barra de progreso de cada fila de Actualizaciones
+function getUpdateProgressEls(target) {
+  if (target === 'ytdlp') return { wrap: updateYtdlpProgressWrap, fill: updateYtdlpProgressFill, text: updateYtdlpProgressText };
+  if (target === 'ffmpeg') return { wrap: updateFfmpegProgressWrap, fill: updateFfmpegProgressFill, text: updateFfmpegProgressText };
+  if (target === 'pot') return { wrap: updatePotProgressWrap, fill: updatePotProgressFill, text: updatePotProgressText };
+  return { wrap: updateDenoProgressWrap, fill: updateDenoProgressFill, text: updateDenoProgressText };
+}
+
 function showUpdateProgress(target, percent) {
-  const wrap = target === 'ytdlp' ? updateYtdlpProgressWrap : target === 'ffmpeg' ? updateFfmpegProgressWrap : updateDenoProgressWrap;
-  const fill = target === 'ytdlp' ? updateYtdlpProgressFill : target === 'ffmpeg' ? updateFfmpegProgressFill : updateDenoProgressFill;
-  const text = target === 'ytdlp' ? updateYtdlpProgressText : target === 'ffmpeg' ? updateFfmpegProgressText : updateDenoProgressText;
+  const { wrap, fill, text } = getUpdateProgressEls(target);
 
   wrap.classList.remove('hidden');
   const clamped = Math.max(0, Math.min(100, percent));
@@ -4898,7 +6287,7 @@ function showUpdateProgress(target, percent) {
 function applyUpdateCheckResult(result) {
   lastUpdateCheck = result;
   const count =
-    (result.ytdlpUpdateAvailable ? 1 : 0) + (result.ffmpegUpdateAvailable ? 1 : 0) + (result.denoUpdateAvailable ? 1 : 0);
+    (result.ytdlpUpdateAvailable ? 1 : 0) + (result.ffmpegUpdateAvailable ? 1 : 0) + (result.denoUpdateAvailable ? 1 : 0) + (result.potUpdateAvailable ? 1 : 0);
 
   settingsUpdateBadge.classList.toggle('hidden', count === 0);
   menuUpdatesBadge.textContent = String(count);
@@ -4907,6 +6296,7 @@ function applyUpdateCheckResult(result) {
   updateYtdlpAvailableTag.classList.toggle('hidden', !result.ytdlpUpdateAvailable);
   updateFfmpegAvailableTag.classList.toggle('hidden', !result.ffmpegUpdateAvailable);
   updateDenoAvailableTag.classList.toggle('hidden', !result.denoUpdateAvailable);
+  updatePotAvailableTag.classList.toggle('hidden', !result.potUpdateAvailable);
 
   // "Estás en la última versión": solo se muestra cuando se pudo comparar
   // contra la última versión remota (ytdlpChecked/ffmpegChecked/denoChecked)
@@ -4916,6 +6306,7 @@ function applyUpdateCheckResult(result) {
   updateYtdlpUpToDateTag.classList.toggle('hidden', !result.ytdlpChecked || result.ytdlpUpdateAvailable);
   updateFfmpegUpToDateTag.classList.toggle('hidden', !result.ffmpegChecked || result.ffmpegUpdateAvailable);
   updateDenoUpToDateTag.classList.toggle('hidden', !result.denoChecked || result.denoUpdateAvailable);
+  updatePotUpToDateTag.classList.toggle('hidden', !result.potChecked || result.potUpdateAvailable);
 }
 
 // Revisa si hay versiones nuevas de yt-dlp/FFmpeg/Deno disponibles (silencioso:
@@ -4930,7 +6321,7 @@ async function checkForUpdatesSilently() {
 }
 
 function hideUpdateProgress(target) {
-  const wrap = target === 'ytdlp' ? updateYtdlpProgressWrap : target === 'ffmpeg' ? updateFfmpegProgressWrap : updateDenoProgressWrap;
+  const { wrap } = getUpdateProgressEls(target);
   wrap.classList.add('hidden');
 }
 
@@ -4942,18 +6333,27 @@ async function loadUpdateVersions() {
   updateYtdlpVersionEl.textContent = window.i18n.t('checking_version');
   updateFfmpegVersionEl.textContent = window.i18n.t('checking_version');
   updateDenoVersionEl.textContent = window.i18n.t('checking_version');
+  updatePotVersionEl.textContent = window.i18n.t('checking_version');
   try {
     const info = await window.yoinksAPI.getUpdateVersions();
     updateYtdlpVersionEl.textContent = info.ytdlpVersion;
     updateFfmpegVersionEl.textContent = info.ffmpegVersion;
     updateDenoVersionEl.textContent = info.denoVersion;
-    updateDenoBtn.textContent = info.denoManaged ? window.i18n.t('btn_update') : window.i18n.t('btn_install');
-    updateDenoBtn.dataset.managed = info.denoManaged ? '1' : '0';
+    // Deno cuenta como instalado si está en la carpeta administrada O viene
+    // empaquetado en la app (denoAvailable); solo si no hay ninguno se ofrece "Instalar".
+    const denoInstalled = !!(info.denoManaged || info.denoAvailable);
+    updateDenoBtn.textContent = denoInstalled ? window.i18n.t('btn_update') : window.i18n.t('btn_install');
+    updateDenoBtn.dataset.managed = denoInstalled ? '1' : '0';
+    // PO Token: null = todavía no instalado (se instala solo al hacer falta)
+    updatePotVersionEl.textContent = info.potProviderVersion ? `v${info.potProviderVersion}` : window.i18n.t('not_installed');
+    updatePotBtn.textContent = info.potProviderVersion ? window.i18n.t('btn_update') : window.i18n.t('btn_install');
+    updatePotBtn.dataset.managed = info.potProviderVersion ? '1' : '0';
     return info;
   } catch (e) {
     updateYtdlpVersionEl.textContent = window.i18n.t('not_installed');
     updateFfmpegVersionEl.textContent = window.i18n.t('not_installed');
     updateDenoVersionEl.textContent = window.i18n.t('not_installed');
+    updatePotVersionEl.textContent = window.i18n.t('not_installed');
     return null;
   }
 }
@@ -5007,6 +6407,7 @@ function openUpdatesPanel() {
   hideUpdateProgress('ytdlp');
   hideUpdateProgress('ffmpeg');
   hideUpdateProgress('deno');
+  hideUpdateProgress('pot');
   updatesOverlay.classList.remove('hidden');
   loadYtdlpChannelSetting();
   applyUpdateCheckResult(lastUpdateCheck);
@@ -5125,6 +6526,42 @@ async function runDenoUpdate(wasManaged) {
 updateDenoBtn.addEventListener('click', () => {
   const wasManaged = updateDenoBtn.dataset.managed === '1';
   runDenoUpdate(wasManaged);
+});
+
+// Instala/actualiza el proveedor de PO Token (servidor + plugin de bgutil).
+// No entra en la instalación automática del primer arranque: se instala solo
+// cuando hace falta (video con restricción de edad) o desde este botón.
+async function runPotUpdate(wasInstalled) {
+  updatePotBtn.disabled = true;
+  updatePotBtn.textContent = wasInstalled ? window.i18n.t('updating_ellipsis') : window.i18n.t('installing_ellipsis');
+  showUpdateProgress('pot', 0);
+  setUpdatesStatus(window.i18n.t(wasInstalled ? 'downloading_pot_latest' : 'installing_pot'));
+
+  try {
+    const result = await window.yoinksAPI.updatePotProvider();
+    if (result.success) {
+      updatePotVersionEl.textContent = `v${result.version}`;
+      setUpdatesStatus(window.i18n.t(wasInstalled ? 'pot_updated_ok' : 'pot_installed_ok'), 'success');
+      applyUpdateCheckResult({ ...lastUpdateCheck, potUpdateAvailable: false, potLatestVersion: null, potChecked: true });
+    } else {
+      setUpdatesStatus(window.i18n.t('pot_install_failed', { error: result.error }), 'error');
+    }
+    return result;
+  } catch (err) {
+    setUpdatesStatus(window.i18n.t('pot_install_failed', { error: err.message }), 'error');
+    return { success: false, error: err.message };
+  } finally {
+    hideUpdateProgress('pot');
+    updatePotBtn.disabled = false;
+    // Si salió bien queda instalado ("Actualizar"); si falló sin tenerlo, sigue "Instalar"
+    const nowInstalled = wasInstalled || !!(updatePotVersionEl.textContent && updatePotVersionEl.textContent.startsWith('v'));
+    updatePotBtn.textContent = window.i18n.t(nowInstalled ? 'btn_update' : 'btn_install');
+    updatePotBtn.dataset.managed = nowInstalled ? '1' : '0';
+  }
+}
+
+updatePotBtn.addEventListener('click', () => {
+  runPotUpdate(updatePotBtn.dataset.managed === '1');
 });
 
 // ================= INSTALACIÓN AUTOMÁTICA AL ABRIR LA APP =================

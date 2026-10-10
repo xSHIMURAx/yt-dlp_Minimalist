@@ -149,43 +149,257 @@
   color: #1b1b1b;
 }
 
-/* ---- Menú de calidad (ahora se abre con clic derecho sobre
-   .ytdlp-minimalist-btn, ya no hay un botón "caret" aparte) ---- */
+/* ---- Menú de calidad (se abre con clic derecho sobre .ytdlp-minimalist-btn) ----
+   Mismo look que la lista de calidades del popup (terminal oscura,
+   monoespaciada, escala de grises, acento cian) pero compacto: filas de 22px,
+   fuente chica y 184px de ancho. Todo lleva "all: unset" porque esto vive
+   dentro de la página y no debe heredar estilos del sitio. */
 .ytdlp-minimalist-quality-menu {
   all: initial;
   position: fixed;
   z-index: 2147483647;
-  font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
-  background: #1c1c1c;
-  border: 1px solid #3a3a3a;
-  border-radius: 7px;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
-  padding: 4px;
-  min-width: 168px;
+  box-sizing: border-box;
   display: none;
+  width: 232px;
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+  padding: 3px 0;
+  background: #0d0d0d;
+  border: 1px solid #3a3a3a;
+  border-radius: 4px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+  font-family: 'Cascadia Code', 'Consolas', 'SF Mono', 'JetBrains Mono', monospace;
+  -webkit-font-smoothing: antialiased;
+  scrollbar-width: thin;
+  scrollbar-color: #3a3a3a transparent;
 }
 
 .ytdlp-minimalist-quality-menu.open {
   display: block;
 }
 
-.ytdlp-minimalist-quality-menu button {
+.ytdlp-minimalist-quality-menu * {
   all: unset;
   box-sizing: border-box;
+}
+
+/* "// Seleccionar calidad" */
+.ytdlp-qm-title {
   display: block;
-  width: 100%;
-  padding: 6px 9px;
-  font-size: 12px;
-  color: #e6e6e6;
-  border-radius: 5px;
+  padding: 3px 9px 4px;
+  font-size: 10.5px;
+  line-height: 14px;
+  color: #a0a0a0;
+  white-space: nowrap;
+}
+
+.ytdlp-qm-title::before {
+  content: '// ';
+  color: #6e6e6e;
+}
+
+/* Pestañas segmentadas (Video/Audio y contenedor o formato de audio), como en el popup */
+.ytdlp-qm-tabs {
+  display: flex;
+  margin: 0 8px 5px;
+  border: 1px solid #3a3a3a;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.ytdlp-qm-tab {
+  display: block;
+  flex: 1 1 0;
+  height: 21px;
+  padding: 0 2px;
+  border-right: 1px solid #3a3a3a;
+  font-size: 10.5px;
+  line-height: 21px;
+  text-align: center;
+  text-transform: uppercase;
+  color: #a8a8a8;
+  white-space: nowrap;
   cursor: pointer;
 }
 
-.ytdlp-minimalist-quality-menu button:hover {
+.ytdlp-qm-tab:last-child {
+  border-right: 0;
+}
+
+.ytdlp-qm-tab:hover,
+.ytdlp-qm-tab:focus-visible {
+  background: #1f1f1f;
+  color: #ffffff;
+}
+
+.ytdlp-qm-tab.is-active,
+.ytdlp-qm-tab.is-active:hover {
+  background: #f2f2f2;
+  color: #111111;
+  font-weight: 700;
+}
+
+.ytdlp-qm-list {
+  display: block;
+  padding-top: 2px;
+}
+
+.ytdlp-qm-sep {
+  display: block;
+  height: 1px;
+  margin: 3px 0;
   background: #2e2e2e;
 }
 
-.ytdlp-minimalist-quality-menu button.is-current {
-  color: #7ee0a0;
+.ytdlp-qm-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  height: 23px;
+  padding: 0 9px;
+  font-size: 12px;
+  line-height: 23px;
+  color: #c4c4c4;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+/* Marcador ▸ (visible en hover y en la opción actual), como en el popup */
+.ytdlp-qm-row::before {
+  content: '\25B8';
+  flex: none;
+  width: 8px;
+  font-size: 11px;
+  color: transparent;
+}
+
+.ytdlp-qm-row:hover,
+.ytdlp-qm-row:focus-visible {
+  background: #232323;
+  color: #ffffff;
+}
+
+.ytdlp-qm-row:hover::before,
+.ytdlp-qm-row:focus-visible::before {
+  color: #8a8a8a;
+}
+
+.ytdlp-qm-row.is-current {
+  color: #ffffff;
   font-weight: 600;
+}
+
+.ytdlp-qm-row.is-current::before {
+  color: #ffffff;
+}
+
+.ytdlp-qm-name {
+  display: block;
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ytdlp-qm-fmt {
+  display: block;
+  flex: none;
+  margin-left: auto;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: #9a9a9a;
+  text-transform: uppercase;
+}
+
+.ytdlp-qm-row:hover .ytdlp-qm-fmt,
+.ytdlp-qm-row.is-current .ytdlp-qm-fmt {
+  color: #d0d0d0;
+}
+
+/* Insignias (mismos colores que .q-badge del popup, en chico) */
+.ytdlp-qm-badge {
+  display: block;
+  flex: none;
+  padding: 0 4px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  font-size: 9.5px;
+  font-weight: 700;
+  line-height: 14px;
+  letter-spacing: 0.02em;
+}
+
+.ytdlp-qm-badge.b-best { color: #29e6e6; border-color: rgba(41, 230, 230, 0.6); }
+.ytdlp-qm-badge.b-4k   { color: #062626; background: #29e6e6; border-color: #29e6e6; }
+.ytdlp-qm-badge.b-2k   { color: #29e6e6; border-color: rgba(41, 230, 230, 0.55); }
+.ytdlp-qm-badge.b-fhd,
+.ytdlp-qm-badge.b-hd   { color: #7ee787; border-color: rgba(126, 231, 135, 0.55); }
+.ytdlp-qm-badge.b-sd   { color: #e0b163; border-color: rgba(224, 177, 99, 0.55); }
+
+/* ---- Tema oscuro (como el programa de escritorio) ---- */
+.ytdlp-minimalist-overlay.theme-dark {
+  background: #161616;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.6), 0 0 0 1px #3a3a3a;
+}
+
+.theme-dark .ytdlp-minimalist-btn {
+  color: #e8e8e8;
+}
+
+.theme-dark .ytdlp-minimalist-btn:hover {
+  background: #262626;
+}
+
+.theme-dark .ytdlp-minimalist-btn:disabled {
+  color: #7a7a7a;
+}
+
+.theme-dark .ytdlp-minimalist-btn.is-success {
+  color: #7ac97a;
+}
+
+.theme-dark .ytdlp-minimalist-btn.is-error {
+  color: #ff7b72;
+}
+
+.theme-dark .ytdlp-minimalist-btn.is-downloaded {
+  color: #5ab0ff;
+}
+
+.theme-dark .ytdlp-minimalist-btn.is-downloaded:hover {
+  color: #e8e8e8;
+}
+
+.theme-dark .ytdlp-minimalist-close {
+  color: #7a7a7a;
+  border-left-color: #3a3a3a;
+}
+
+.theme-dark .ytdlp-minimalist-close:hover {
+  background: #262626;
+  color: #e8e8e8;
+}
+
+/* En modo ícono "ya descargado" se pinta todo el botón de azul (igual en ambos temas) */
+.theme-dark.mode-icon.is-downloaded {
+  background: #3b9eff;
+}
+
+.theme-dark.mode-icon.is-downloaded .ytdlp-minimalist-btn {
+  color: #ffffff;
+}
+
+.theme-dark.mode-icon.is-downloaded .ytdlp-minimalist-btn:hover {
+  background: #2f8bea;
+}
+
+.theme-dark.mode-icon.is-downloaded .ytdlp-minimalist-close {
+  color: #eaf4ff;
+  border-left-color: rgba(255, 255, 255, 0.35);
+}
+
+.theme-dark.mode-icon.is-downloaded .ytdlp-minimalist-close:hover {
+  background: #2f8bea;
+  color: #ffffff;
 }

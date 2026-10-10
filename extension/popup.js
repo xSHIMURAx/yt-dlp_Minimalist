@@ -2,6 +2,12 @@
 const sendScreen = document.getElementById('sendScreen');
 const pageTitleEl = document.getElementById('pageTitle');
 const sendBtn = document.getElementById('sendBtn');
+const sendAppBtn = document.getElementById('sendAppBtn');
+// Los dos botones de envío (con calidad / solo al programa) se bloquean juntos.
+function setSendDisabled(v) {
+  sendBtn.disabled = v;
+  if (sendAppBtn) sendAppBtn.disabled = v;
+}
 const statusEl = document.getElementById('status');
 const qualitySelect = document.getElementById('qualitySelect');
 
@@ -23,11 +29,25 @@ const ACTIVE_DOWNLOADS_KEY = 'activeDownloads';
 // estado que le ponemos a una tarjeta cuando la app ya no tiene registrada
 // esa descarga (ver 'notFound' en pollOnce) — no hay nada más que sondear.
 const TERMINAL_STATUSES = ['completed', 'error', 'cancelled', 'unknown'];
-// Cuánto se deja la tarjeta mostrando su resultado final (✓ Completado /
-// Error / Cancelado) antes de desvanecerse sola y sacarse de la lista — así
-// el panel "se vacía" solo a medida que cada descarga termina, en vez de
-// desaparecer de golpe sin que el usuario llegue a verlo.
-const REMOVE_DELAY_MS = 1400;
+// Cuánto se deja la tarjeta mostrando su resultado final antes de desvanecerse
+// sola (ver scheduleFinalRemoval). Antes eran 1,4 s para todo, muy poco para
+// leer un error o llegar a tocar "Abrir carpeta".
+//   completed / unknown: tiempo para leer el resultado y abrir archivo/carpeta
+//   cancelled:           lo cancelaste vos, no hace falta retenerla
+//   error:               null = se queda hasta que la cierres con la "×"
+// El resultado queda guardado en storage junto con finishedAt, así sobrevive
+// si Chrome cierra el popup mientras tanto (y los errores, hasta que los cierres).
+const FINAL_LINGER_MS = { completed: 12000, unknown: 12000, cancelled: 2500, error: null };
+// Una descarga enviada SIN calidad ("Enviar al programa", o el botón flotante
+// sin calidad elegida) la registra la app recién cuando el usuario elige la
+// calidad en su propio selector; hasta entonces /progress contesta "no
+// existe". Durante esta ventana eso se muestra como "Esperando en la app…" en
+// vez de "Seguimiento perdido".
+const AWAITING_APP_MS = 5 * 60 * 1000;
+// Si la app se cierra mientras una descarga sigue esperando que elijas la
+// calidad, esa elección se pierde (vive solo en la memoria de la app). Pasado
+// este tiempo sin conexión, la tarjeta se saca sola en vez de quedar colgada.
+const AWAITING_OFFLINE_GRACE_MS = 8000;
 
 // ---- Idioma actual de la interfaz ----
 // Se lee de chrome.storage.sync (ver i18n.js) y se aplica tanto al HTML
@@ -87,6 +107,7 @@ async function getActiveTab() {
 // realmente se manda a descargar (ver sendBtn más abajo).
 let effectiveUrl = null;
 let effectiveTitle = null;
+let effectiveThumb = null;
 
 async function resolveEffectiveUrlAndTitle(tab) {
   if (!tab || !tab.id || !tab.url || !/^https?:\/\//i.test(tab.url)) {
@@ -110,14 +131,15 @@ async function resolveEffectiveUrlAndTitle(tab) {
       const resolved = await resolveEffectiveUrlAndTitle(activeTab);
       effectiveUrl = resolved.url;
       effectiveTitle = resolved.title;
+      effectiveThumb = resolved.thumbnail || null;
       pageTitleEl.textContent = effectiveTitle || effectiveUrl;
     } else {
       pageTitleEl.textContent = t('tab_read_error1', currentLang);
-      sendBtn.disabled = true;
+      setSendDisabled(true);
     }
   } catch (err) {
     pageTitleEl.textContent = t('tab_read_error2', currentLang);
-    sendBtn.disabled = true;
+    setSendDisabled(true);
   }
 })();
 
@@ -132,8 +154,16 @@ i18nGetLang((lang) => {
 // Recordamos la última calidad elegida para que el select ya venga
 // preseleccionado la próxima vez (igual que el modo del botón flotante).
 chrome.storage.sync.get({ [QUALITY_STORAGE_KEY]: 'best' }, (data) => {
-  if ([...qualitySelect.options].some((o) => o.value === data[QUALITY_STORAGE_KEY])) {
+  // El popup siempre abre en Video: si lo último fue audio se ignora y queda
+  // la opción por defecto (mejor calidad de video).
+  const saved = String(data[QUALITY_STORAGE_KEY] || '');
+  // Tampoco se restaura un contenedor distinto de MP4: el video por defecto es MP4.
+  const savedContainer = saved.split(':')[saved.startsWith('video') ? 2 : 1];
+  const isMp4OrLegacy = !savedContainer || savedContainer === 'mp4';
+  if (!saved.startsWith('audio') && isMp4OrLegacy && [...qualitySelect.options].some((o) => o.value === saved)) {
     qualitySelect.value = data[QUALITY_STORAGE_KEY];
+    // Avisa a skin.js (interfaz visual de calidad) para que se redibuje.
+    qualitySelect.dispatchEvent(new Event('qualitysync'));
   }
 });
 
@@ -141,10 +171,120 @@ qualitySelect.addEventListener('change', () => {
   chrome.storage.sync.set({ [QUALITY_STORAGE_KEY]: qualitySelect.value });
 });
 
+// Asigna texto solo si cambió. El sondeo corre cada 800 ms y reasignar el
+// mismo string reemplaza el nodo de texto, lo que hace que algunos lectores de
+// pantalla vuelvan a anunciar un aria-live sin que haya cambiado nada.
+function setText(el, text) {
+  if (el.textContent !== text) el.textContent = text;
+}
+
 // ---- Mostrar/ocultar el estado vacío según haya o no tarjetas ----
 function updateEmptyState() {
   const hasCards = progressListEl.children.length > 0;
   progressEmptyState.classList.toggle('show', !hasCards);
+  updateProgressBadge();
+}
+
+// ---- Contador en la pestaña "Progreso" ----
+// Número de descargas vivas; si no queda ninguna pero hay un error esperando
+// que lo cierres, un "!" en rojo. Sin nada pendiente, no se muestra.
+const progressBadgeEl = document.getElementById('progressBadge');
+const progressToolbarEl = document.getElementById('progressToolbar');
+const progressSummaryEl = document.getElementById('progressSummary');
+const clearFinishedBtn = document.getElementById('clearFinishedBtn');
+
+// ---- Resumen arriba de la lista + botón "Limpiar finalizadas" ----
+// Una sola línea con lo que hay en este momento, solo las partes con valor
+// ("2 descargando · 1 en pausa"). Clasificación de cada tarjeta:
+//   estado final (completed/cancelled/unknown) -> finalizada
+//   error                                      -> con error (también limpiable)
+//   paused                                     -> en pausa
+//   notConnected                               -> sin conexión
+//   awaitingApp                                -> esperando en la app
+//   cualquier otro                             -> descargando
+function updateProgressSummary() {
+  if (!progressToolbarEl || !progressSummaryEl) return;
+  const c = { downloading: 0, paused: 0, awaiting: 0, offline: 0, error: 0, done: 0 };
+  for (const e of entriesById.values()) {
+    if (e.status === 'error') c.error++;
+    else if (TERMINAL_STATUSES.includes(e.status)) c.done++;
+    else if (e.status === 'paused') c.paused++;
+    else if (e.notConnected) c.offline++;
+    else if (e.awaitingApp) c.awaiting++;
+    else c.downloading++;
+  }
+  const plural = (n, base) => t(`${base}_${n === 1 ? 'one' : 'other'}`, currentLang, { n });
+  const parts = [];
+  if (c.downloading) parts.push({ cls: 'live', text: t('progress_sum_downloading', currentLang, { n: c.downloading }) });
+  if (c.paused)      parts.push({ cls: '',     text: t('progress_sum_paused', currentLang, { n: c.paused }) });
+  if (c.awaiting)    parts.push({ cls: '',     text: t('progress_sum_awaiting', currentLang, { n: c.awaiting }) });
+  if (c.offline)     parts.push({ cls: 'warn', text: t('progress_sum_offline', currentLang, { n: c.offline }) });
+  if (c.error)       parts.push({ cls: 'err',  text: plural(c.error, 'progress_sum_error') });
+  if (c.done)        parts.push({ cls: '',     text: plural(c.done, 'progress_sum_done') });
+
+  // Se arma con nodos (no innerHTML) y solo si el texto cambió, para no
+  // provocar re-anuncios del aria-live en cada sondeo.
+  const key = parts.map((p) => `${p.cls}:${p.text}`).join('|');
+  if (progressSummaryEl.dataset.key !== key) {
+    progressSummaryEl.dataset.key = key;
+    progressSummaryEl.textContent = '';
+    parts.forEach((p, i) => {
+      if (i) {
+        const sep = document.createElement('span');
+        sep.className = 'sum-sep';
+        sep.textContent = ' · ';
+        progressSummaryEl.appendChild(sep);
+      }
+      const span = document.createElement('span');
+      span.className = 'sum-part' + (p.cls ? ` ${p.cls}` : '');
+      span.textContent = p.text;
+      progressSummaryEl.appendChild(span);
+    });
+  }
+  progressToolbarEl.hidden = parts.length === 0;
+  if (clearFinishedBtn) clearFinishedBtn.hidden = c.done + c.error + c.awaiting + c.offline === 0;
+}
+
+// Saca de la lista todas las tarjetas que ya llegaron a un estado final
+// (incluidos los errores, que de otro modo esperan a que los cierres uno por
+// uno). No toca las descargas vivas ni cancela nada en la app. Se guarda una
+// sola vez al final (varias escrituras get→set en paralelo se pisarían).
+if (clearFinishedBtn) {
+  clearFinishedBtn.addEventListener('click', () => {
+    // También se quitan las que esperan en la app o están sin conexión (las
+    // que muestran la "×"); las descargas vivas no se tocan.
+    for (const [id, e] of [...entriesById]) {
+      if (TERMINAL_STATUSES.includes(e.status) || e.awaitingApp || e.notConnected) removeCard(id);
+    }
+    saveActiveDownloads();
+    stopPollingIfIdle();
+  });
+}
+
+function updateProgressBadge() {
+  updateProgressSummary();
+  if (!progressBadgeEl) return;
+  const entries = [...entriesById.values()];
+  const live = entries.filter((e) => !TERMINAL_STATUSES.includes(e.status)).length;
+  const hasError = entries.some((e) => e.status === 'error');
+  progressBadgeEl.classList.toggle('error', live === 0 && hasError);
+  if (live > 0) {
+    progressBadgeEl.textContent = String(live);
+    progressBadgeEl.title = t('progress_badge_live', currentLang, { n: live });
+    progressBadgeEl.hidden = false;
+  } else if (hasError) {
+    progressBadgeEl.textContent = '!';
+    progressBadgeEl.title = t('progress_badge_error', currentLang);
+    progressBadgeEl.hidden = false;
+  } else {
+    progressBadgeEl.hidden = true;
+  }
+}
+
+// Botón del estado vacío: va directo a la pestaña de envío.
+const progressGoDownloadBtn = document.getElementById('progressGoDownload');
+if (progressGoDownloadBtn) {
+  progressGoDownloadBtn.addEventListener('click', () => setActiveUiTab('download'));
 }
 
 // ---- Crear la tarjeta (DOM) de una descarga nueva ----
@@ -159,10 +299,20 @@ function createCard(entry) {
   li.dataset.id = entry.id;
   li.innerHTML = `
     <button type="button" class="progress-card-close" title="${t('dismiss_card_title', currentLang)}" data-i18n-title="dismiss_card_title">&times;</button>
-    <div class="progress-title"></div>
-    <div class="progress-bar-wrap"><div class="progress-bar-fill"></div></div>
-    <div class="progress-status-row"><span class="progress-status-text">${t('sending_ellipsis', currentLang)}</span></div>
+    <div class="progress-head">
+      <img class="progress-thumb" alt="" hidden>
+      <div class="progress-title"></div>
+    </div>
+    <div class="progress-bar-wrap" role="progressbar" aria-valuemin="0" aria-valuemax="100"><div class="progress-bar-fill"></div></div>
+    <div class="progress-status-row">
+      <span class="progress-status-text" aria-live="polite">${t('sending_ellipsis', currentLang)}</span>
+      <span class="progress-percent"></span>
+    </div>
     <div class="progress-meta"></div>
+    <div class="entry-actions progress-actions" hidden>
+      <button type="button" class="entry-action-btn open-file-btn">${t('open_file_btn', currentLang)}</button>
+      <button type="button" class="entry-action-btn open-folder-btn">${t('open_folder_btn', currentLang)}</button>
+    </div>
     <div class="download-controls">
       <button type="button" class="pause-btn">${t('pause_btn', currentLang)}</button>
       <button type="button" class="resume-btn">${t('resume_btn', currentLang)}</button>
@@ -177,6 +327,12 @@ function createCard(entry) {
     barFill: li.querySelector('.progress-bar-fill'),
     statusText: li.querySelector('.progress-status-text'),
     meta: li.querySelector('.progress-meta'),
+    bar: li.querySelector('.progress-bar-wrap'),
+    thumb: li.querySelector('.progress-thumb'),
+    percent: li.querySelector('.progress-percent'),
+    actions: li.querySelector('.progress-actions'),
+    openFileBtn: li.querySelector('.open-file-btn'),
+    openFolderBtn: li.querySelector('.open-folder-btn'),
     controls: li.querySelector('.download-controls'),
     pauseBtn: li.querySelector('.pause-btn'),
     resumeBtn: li.querySelector('.resume-btn'),
@@ -216,7 +372,7 @@ function createCard(entry) {
         refs.resumeBtn.disabled = false;
         refs.cancelBtn.disabled = false;
       } else {
-        refs.statusText.textContent = t('resuming_ellipsis', currentLang);
+        setText(refs.statusText, t('resuming_ellipsis', currentLang));
         refs.meta.textContent = '';
       }
     });
@@ -234,6 +390,35 @@ function createCard(entry) {
     });
   });
 
+  // Abrir archivo / carpeta al terminar (mismos mensajes que usa el historial;
+  // la ruta se lee de la entrada vigente porque se actualiza en cada sondeo).
+  refs.openFileBtn.addEventListener('click', () => {
+    const cur = entriesById.get(entry.id) || entry;
+    if (!cur.path) return;
+    refs.openFileBtn.disabled = true;
+    chrome.runtime.sendMessage({ type: 'open-file-by-path', path: cur.path }, (response) => {
+      refs.openFileBtn.disabled = false;
+      if (!response || !response.ok) {
+        flashActionError(refs.openFileBtn, t('open_file_not_found', currentLang));
+      }
+    });
+  });
+
+  refs.openFolderBtn.addEventListener('click', () => {
+    const cur = entriesById.get(entry.id) || entry;
+    if (!cur.path && !cur.folder) return;
+    refs.openFolderBtn.disabled = true;
+    chrome.runtime.sendMessage(
+      { type: 'open-folder-by-path', path: cur.path, folder: cur.folder },
+      (response) => {
+        refs.openFolderBtn.disabled = false;
+        if (!response || !response.ok) {
+          flashActionError(refs.openFolderBtn, t('open_folder_not_found', currentLang));
+        }
+      }
+    );
+  });
+
   cardsById.set(entry.id, refs);
   // Va arriba de todo (no al final): así la descarga más reciente queda
   // siempre visible sin tener que scrollear, y las anteriores se van
@@ -247,6 +432,19 @@ function createCard(entry) {
   return refs;
 }
 
+// Miniatura de la tarjeta: YouTube por URL, el resto con la que resolvió
+// resolveEffectiveUrlAndTitle() al enviar (entry.thumbnail). Se resuelve una sola vez.
+function ensureCardThumb(refs, entry) {
+  if (refs.thumbResolved) return;
+  const src = (entry.url && youtubeThumbnailUrl(entry.url)) || entry.thumbnail || null;
+  if (!src) return;
+  refs.thumbResolved = true;
+  refs.thumb.addEventListener('error', () => { refs.thumb.hidden = true; }, { once: true });
+  refs.thumb.referrerPolicy = 'no-referrer';
+  refs.thumb.src = src;
+  refs.thumb.hidden = false;
+}
+
 // ---- Pintar el estado actual de UNA tarjeta puntual ----
 function updateCard(id) {
   const entry = entriesById.get(id);
@@ -254,37 +452,51 @@ function updateCard(id) {
   if (!entry || !refs) return;
 
   refs.title.textContent = entry.title || entry.url || '';
+  ensureCardThumb(refs, entry);
 
   const percent = typeof entry.percent === 'number' ? Math.max(0, Math.min(100, entry.percent)) : null;
+  const percentLabel = percent !== null ? `${percent.toFixed(0)}%` : '';
+  const isFinal = TERMINAL_STATUSES.includes(entry.status);
+
   refs.barFill.classList.remove('indeterminate', 'done', 'error');
   refs.controls.classList.remove('show');
+  refs.actions.hidden = true;
+  refs.percent.textContent = '';
+  // La "×" solo oculta la tarjeta (no cancela nada en la app), así que
+  // se ofrece únicamente cuando ya no hay una descarga viva que controlar:
+  // estados finales o "Sin conexión". Mientras descarga, mandan Pausar/Cancelar.
+  refs.closeBtn.hidden = !(isFinal || entry.notConnected || entry.awaitingApp);
 
   if (entry.status === 'completed') {
     refs.barFill.style.width = '100%';
     refs.barFill.classList.add('done');
-    refs.statusText.textContent = t('completed_check', currentLang);
+    setText(refs.statusText, t('completed_check', currentLang));
     refs.statusText.className = 'progress-status-text success';
+    refs.percent.textContent = '100%';
     refs.meta.textContent = entry.folder || entry.path || '';
+    refs.actions.hidden = !entry.path;
   } else if (entry.status === 'error') {
     refs.barFill.style.width = percent !== null ? `${percent}%` : '100%';
     refs.barFill.classList.add('error');
-    refs.statusText.textContent = t('error_label', currentLang);
+    setText(refs.statusText, t('error_label', currentLang));
     refs.statusText.className = 'progress-status-text error';
+    refs.percent.textContent = percentLabel;
     refs.meta.textContent = entry.error || t('download_failed_generic', currentLang);
   } else if (entry.status === 'cancelled') {
     refs.barFill.style.width = percent !== null ? `${percent}%` : '0%';
-    refs.statusText.textContent = t('cancelled_label', currentLang);
+    setText(refs.statusText, t('cancelled_label', currentLang));
     refs.statusText.className = 'progress-status-text';
     refs.meta.textContent = '';
   } else if (entry.status === 'unknown') {
-    refs.barFill.style.width = percent !== null ? `${percent}%` : '100%';
-    refs.statusText.textContent = t('progress_lost_label', currentLang);
+    refs.barFill.style.width = percent !== null ? `${percent}%` : '0%';
+    setText(refs.statusText, t('progress_lost_label', currentLang));
     refs.statusText.className = 'progress-status-text';
     refs.meta.textContent = t('progress_lost_meta', currentLang);
   } else if (entry.status === 'paused') {
     refs.barFill.style.width = percent !== null ? `${percent}%` : '0%';
-    refs.statusText.textContent = t('paused_label', currentLang);
+    setText(refs.statusText, t('paused_label', currentLang));
     refs.statusText.className = 'progress-status-text';
+    refs.percent.textContent = percentLabel;
     refs.meta.textContent = t('paused_meta', currentLang);
     // En pausa se ofrece reanudar (en vez de pausar) + cancelar.
     refs.pauseBtn.classList.add('hide');
@@ -296,9 +508,19 @@ function updateCard(id) {
     // No pudimos consultar el estado (la app no responde). No sabemos si
     // sigue corriendo o no, así que dejamos la barra como estaba y solo
     // avisamos en el texto de estado.
-    refs.statusText.textContent = t('no_connection', currentLang);
-    refs.statusText.className = 'progress-status-text';
+    if (percent !== null) refs.barFill.style.width = `${percent}%`;
+    setText(refs.statusText, t('no_connection', currentLang));
+    refs.statusText.className = 'progress-status-text offline';
+    refs.percent.textContent = percentLabel;
     refs.meta.textContent = t('check_app_open', currentLang);
+  } else if (entry.awaitingApp) {
+    // Todavía no hay descarga que pausar/cancelar: solo se avisa dónde falta
+    // actuar. La "×" queda disponible por si el usuario cierra el selector.
+    refs.barFill.style.width = '40%';
+    refs.barFill.classList.add('indeterminate');
+    setText(refs.statusText, t('awaiting_app_label', currentLang));
+    refs.statusText.className = 'progress-status-text';
+    refs.meta.textContent = t('awaiting_app_meta', currentLang);
   } else {
     // 'starting' | 'downloading' | sin dato de % todavía
     refs.controls.classList.add('show');
@@ -311,10 +533,11 @@ function updateCard(id) {
     if (percent === null) {
       refs.barFill.style.width = '40%';
       refs.barFill.classList.add('indeterminate');
-      refs.statusText.textContent = t('starting_ellipsis', currentLang);
+      setText(refs.statusText, t('starting_ellipsis', currentLang));
     } else {
       refs.barFill.style.width = `${percent}%`;
-      refs.statusText.textContent = t('downloading_percent', currentLang, { percent: percent.toFixed(0) });
+      setText(refs.statusText, t('downloading_label', currentLang));
+      refs.percent.textContent = percentLabel;
     }
     refs.statusText.className = 'progress-status-text';
     const metaParts = [];
@@ -322,6 +545,19 @@ function updateCard(id) {
     if (entry.eta) metaParts.push(t('eta_label', currentLang, { eta: entry.eta }));
     refs.meta.textContent = metaParts.join(' · ');
   }
+
+  // Accesibilidad: nombre de la barra (qué descarga es), valor actual (sin
+  // valor mientras es indeterminada) y un texto legible con estado + porcentaje
+  // ("Descargando 45%"), que los lectores de pantalla leen en vez del número solo.
+  refs.bar.setAttribute('aria-label', t('progressbar_label', currentLang, { title: refs.title.textContent }));
+  if (refs.barFill.classList.contains('indeterminate')) {
+    refs.bar.removeAttribute('aria-valuenow');
+  } else {
+    refs.bar.setAttribute('aria-valuenow', String(Math.round(parseFloat(refs.barFill.style.width) || 0)));
+  }
+  refs.bar.setAttribute('aria-valuetext', [refs.statusText.textContent, refs.percent.textContent].filter(Boolean).join(' '));
+
+  updateProgressBadge();
 }
 
 // ---- Sacar una tarjeta de la lista (con una animación corta de salida) ----
@@ -329,6 +565,7 @@ function removeCard(id) {
   const refs = cardsById.get(id);
   cardsById.delete(id);
   entriesById.delete(id);
+  updateProgressBadge();
   if (refs && refs.el) {
     refs.el.classList.add('removing');
     setTimeout(() => {
@@ -338,6 +575,31 @@ function removeCard(id) {
   } else {
     updateEmptyState();
   }
+}
+
+// ---- Sacar sola una tarjeta que llegó a un estado final ----
+// Respeta FINAL_LINGER_MS desde finishedAt (así, si el popup se cerró y se
+// reabrió, solo queda el tiempo que faltaba). Los errores no se programan:
+// quedan hasta que el usuario los cierre. Si el mouse está encima de la
+// tarjeta (leyendo, o por tocar "Abrir carpeta") se espera un poco más.
+function scheduleFinalRemoval(id) {
+  const entry = entriesById.get(id);
+  if (!entry) return;
+  const linger = FINAL_LINGER_MS[entry.status];
+  if (linger == null) return;
+  const elapsed = Date.now() - (entry.finishedAt || Date.now());
+  const attempt = (wait) => setTimeout(() => {
+    const refs = cardsById.get(id);
+    if (!entriesById.has(id)) return;
+    if (refs && refs.el.matches(':hover')) {
+      attempt(2000);
+      return;
+    }
+    removeActiveDownloadFromStorage(id);
+    removeCard(id);
+    stopPollingIfIdle();
+  }, wait);
+  attempt(Math.max(0, linger - elapsed));
 }
 
 // ---- Guardar/leer la lista de descargas activas ----
@@ -383,7 +645,11 @@ function ensurePolling() {
 }
 
 function stopPollingIfIdle() {
-  if (entriesById.size === 0 && pollTimer) {
+  // Las tarjetas en estado final (p. ej. un error esperando que lo cierres)
+  // ya no se sondean, así que el intervalo solo hace falta mientras quede
+  // alguna descarga viva.
+  const hasLive = [...entriesById.values()].some((e) => !TERMINAL_STATUSES.includes(e.status));
+  if (!hasLive && pollTimer) {
     clearInterval(pollTimer);
     pollTimer = null;
   }
@@ -414,20 +680,45 @@ function pollOnce(id, currentEntry) {
       // a volver a existir. Lo tratamos como un final "desconocido" para que
       // la tarjeta se saque sola, igual que completed/error/cancelled, y así
       // la lista de Progreso deje de acumular tarjetas fantasma.
-      const merged = { ...currentEntry, status: 'unknown', notConnected: false };
+      // Sin calidad elegida todavía: la app aún no registró esta descarga porque
+      // espera que el usuario elija en su selector. No es un seguimiento
+      // perdido: se espera (hasta AWAITING_APP_MS) y se sigue sondeando.
+      const startedAt = currentEntry.startedAt || Date.now();
+      if (!currentEntry.quality && Date.now() - startedAt < AWAITING_APP_MS) {
+        entriesById.set(id, { ...currentEntry, startedAt, awaitingApp: true, notConnected: false, offlineSince: undefined });
+        updateCard(id);
+        saveActiveDownloads();
+        return;
+      }
+      const merged = { ...currentEntry, status: 'unknown', awaitingApp: false, notConnected: false, finishedAt: Date.now() };
       entriesById.set(id, merged);
       updateCard(id);
-      removeActiveDownloadFromStorage(id);
-      setTimeout(() => {
-        removeCard(id);
-        stopPollingIfIdle();
-      }, REMOVE_DELAY_MS);
+      saveActiveDownloads();
+      scheduleFinalRemoval(id);
+      stopPollingIfIdle();
       return;
     }
 
     if (!response || !response.ok) {
       // La app puede no estar corriendo. No borramos el estado guardado por
       // las dudas de que sea un corte momentáneo; seguimos reintentando.
+      // Si todavía no había empezado (sin calidad elegida, nunca llegó a
+      // descargar) y la app lleva unos segundos sin responder, la app se cerró
+      // y esta descarga ya no existe: se saca la tarjeta sola.
+      // (Solo si la app ya había respondido antes: al abrirla en frío puede tardar en arrancar.)
+      const neverStarted = !currentEntry.quality && currentEntry.awaitingApp;
+      if (neverStarted) {
+        const offlineSince = currentEntry.offlineSince || Date.now();
+        if (Date.now() - offlineSince >= AWAITING_OFFLINE_GRACE_MS) {
+          removeCard(id);
+          saveActiveDownloads();
+          stopPollingIfIdle();
+          return;
+        }
+        entriesById.set(id, { ...currentEntry, notConnected: true, offlineSince });
+        updateCard(id);
+        return;
+      }
       const merged = { ...currentEntry, notConnected: true };
       entriesById.set(id, merged);
       updateCard(id);
@@ -444,6 +735,9 @@ function pollOnce(id, currentEntry) {
       error: response.error,
       title: response.title || currentEntry.title,
       notConnected: false,
+      awaitingApp: false,
+      offlineSince: undefined,
+      finishedAt: TERMINAL_STATUSES.includes(response.status) ? (currentEntry.finishedAt || Date.now()) : undefined,
     };
     entriesById.set(id, merged);
     updateCard(id);
@@ -460,15 +754,11 @@ function pollOnce(id, currentEntry) {
         status: historyStatus,
         extra: { path: response.path, folder: response.folder, error: response.error },
       });
-      // La tarjeta se queda mostrando el resultado un momento (ver
-      // REMOVE_DELAY_MS) y después se saca sola de la lista y del storage:
-      // así el panel "se vacía" solo, y si hay otras descargas en curso al
-      // mismo tiempo siguen su propio curso sin verse afectadas.
-      removeActiveDownloadFromStorage(id);
-      setTimeout(() => {
-        removeCard(id);
-        stopPollingIfIdle();
-      }, REMOVE_DELAY_MS);
+      // La tarjeta queda guardada con su resultado (ya con finishedAt, ver
+      // saveActiveDownloads más arriba) y se saca sola pasado FINAL_LINGER_MS;
+      // los errores se quedan hasta que se cierren a mano.
+      scheduleFinalRemoval(id);
+      stopPollingIfIdle();
     }
   });
 }
@@ -480,18 +770,50 @@ function pollOnce(id, currentEntry) {
   const list = await getActiveDownloads();
   if (!list.length) return;
 
+  const now = Date.now();
+  const expired = new Set();
+  let jumpToProgress = false;
+  let hasLive = false;
+
   for (const entry of list) {
     if (!entry || !entry.id) continue;
+    const isFinal = TERMINAL_STATUSES.includes(entry.status);
+
+    // Resultado final que ya cumplió su tiempo mientras el popup estaba
+    // cerrado: se descarta. Los errores se conservan hasta que se cierren.
+    if (isFinal && entry.status !== 'error') {
+      const linger = FINAL_LINGER_MS[entry.status] ?? 0;
+      if (now - (entry.finishedAt || 0) >= linger) {
+        expired.add(entry.id);
+        continue;
+      }
+    }
+
     entriesById.set(entry.id, entry);
     createCard(entry);
     updateCard(entry.id);
+
+    if (isFinal) {
+      scheduleFinalRemoval(entry.id);
+      // Un error pendiente es lo único final que justifica mover al usuario
+      // a Progreso al abrir el popup; un "completado" viejo no.
+      if (entry.status === 'error') jumpToProgress = true;
+    } else {
+      hasLive = true;
+      jumpToProgress = true;
+    }
   }
-  setActiveUiTab('progress');
-  ensurePolling();
+
+  // Una sola escritura (varias get→set en paralelo se pisarían entre sí).
+  if (expired.size) {
+    chrome.storage.local.set({ [ACTIVE_DOWNLOADS_KEY]: list.filter((e) => e && !expired.has(e.id)) });
+  }
+  if (jumpToProgress) setActiveUiTab('progress');
+  if (hasLive) ensurePolling();
 })();
 
 // ---- Enviar la URL actual ----
-sendBtn.addEventListener('click', async () => {
+async function sendCurrent(withoutQuality) {
   if (!activeTab || !activeTab.url) return;
   if (currentSiteExtensionDisabled) return;
 
@@ -501,10 +823,20 @@ sendBtn.addEventListener('click', async () => {
     return;
   }
 
-  sendBtn.disabled = true;
+  // Recorte opcional (lo maneja skin.js). Se valida ANTES de bloquear el botón
+  // para poder mostrar el error y dejar corregir los tiempos.
+  const trimResult = !withoutQuality && typeof window.skinGetTrim === 'function' ? window.skinGetTrim() : { trim: null };
+  if (trimResult.error) {
+    setStatus(trimResult.error, 'error');
+    return;
+  }
+
+  setSendDisabled(true);
   setStatus(t('sending_ellipsis', currentLang));
 
-  const quality = parseQualityValue(qualitySelect.value);
+  // Sin calidad: la app abre su propio selector (igual que el clic en el botón flotante).
+  const quality = withoutQuality ? null : parseQualityValue(qualitySelect.value);
+  if (quality && trimResult.trim) quality.trim = trimResult.trim;
   // Usamos lo que resolvió resolveEffectiveUrlAndTitle() (el link real del
   // tweet en X/Twitter, o tab.url/tab.title en cualquier otro sitio) en vez
   // de activeTab.title/activeTab.url directamente.
@@ -512,7 +844,7 @@ sendBtn.addEventListener('click', async () => {
   const url = cleanDownloadUrl(effectiveUrl || activeTab.url);
 
   chrome.runtime.sendMessage(
-    { type: 'send-url', url, title, quality },
+    { type: 'send-url', url, title, quality, thumbnail: youtubeThumbnailUrl(url) ? null : effectiveThumb },
     (response) => {
       if (response && response.ok) {
         if (response.id) {
@@ -529,8 +861,14 @@ sendBtn.addEventListener('click', async () => {
             percent: null,
             speed: null,
             eta: null,
+            thumbnail: effectiveThumb || null,
+            startedAt: Date.now(),
           };
           addDownload(entry);
+          // Ya se envió: liberamos el botón y limpiamos "Enviando…" para poder
+          // elegir otra calidad y descargar de nuevo sin cerrar el popup.
+          setSendDisabled(!!currentSiteExtensionDisabled);
+          setStatus('');
           setActiveUiTab('progress');
         } else {
           // La app respondió sin id (versión vieja del servidor, poco
@@ -546,7 +884,7 @@ sendBtn.addEventListener('click', async () => {
         document.body.appendChild(a);
         a.click();
         a.remove();
-        sendBtn.disabled = false;
+        setSendDisabled(false);
 
         if (response.id) {
           // Aunque la app recién se está abriendo, ya podemos arrancar a
@@ -566,19 +904,25 @@ sendBtn.addEventListener('click', async () => {
             percent: null,
             speed: null,
             eta: null,
+            thumbnail: effectiveThumb || null,
+            startedAt: Date.now(),
           };
           addDownload(entry);
+          setStatus('');
           setActiveUiTab('progress');
         } else {
           setStatus(t('opening_app', currentLang), 'success');
         }
       } else {
         setStatus(t('connect_failed', currentLang), 'error');
-        sendBtn.disabled = false;
+        setSendDisabled(false);
       }
     }
   );
-});
+}
+
+sendBtn.addEventListener('click', () => sendCurrent(false));
+if (sendAppBtn) sendAppBtn.addEventListener('click', () => sendCurrent(true));
 
 // Nota: "Abrir archivo/carpeta", "Pausar/Reanudar/Cancelar" y el reinicio de
 // pantalla al terminar ya no son listeners únicos acá — cada tarjeta trae
@@ -654,9 +998,27 @@ function renderHistory() {
     meta.appendChild(time);
     meta.appendChild(status);
 
-    li.appendChild(title);
-    li.appendChild(url);
-    li.appendChild(meta);
+    // Miniatura a la izquierda (solo YouTube) y el resto del contenido en una
+    // columna a la derecha.
+    const body = document.createElement('div');
+    body.className = 'entry-body';
+    body.appendChild(title);
+    body.appendChild(url);
+    body.appendChild(meta);
+
+    const thumbUrl = youtubeThumbnailUrl(entry.url) || entry.thumbnail || null;
+    if (thumbUrl) {
+      li.classList.add('has-thumb');
+      const img = document.createElement('img');
+      img.className = 'entry-thumb';
+      img.alt = '';
+      img.loading = 'lazy';
+      img.referrerPolicy = 'no-referrer';
+      img.src = thumbUrl;
+      img.addEventListener('error', () => { img.remove(); li.classList.remove('has-thumb'); });
+      li.appendChild(img);
+    }
+    li.appendChild(body);
 
     // "Abrir archivo"/"Abrir carpeta" solo tienen sentido si esta entrada
     // llegó a completarse Y el popup estaba abierto (con el sondeo corriendo)
@@ -701,7 +1063,7 @@ function renderHistory() {
 
       actions.appendChild(openFileButton);
       actions.appendChild(openFolderButton);
-      li.appendChild(actions);
+      body.appendChild(actions);
     }
 
     historyListEl.appendChild(li);
@@ -803,6 +1165,19 @@ function showSaved() {
   savedEl.classList.add('show');
   setTimeout(() => savedEl.classList.remove('show'), 1200);
 }
+
+// Tema del botón flotante (claro / oscuro).
+const themeRadios = document.querySelectorAll('input[name="theme"]');
+chrome.storage.sync.get({ overlayTheme: 'light' }, (data) => {
+  const cur = document.querySelector(`input[name="theme"][value="${data.overlayTheme === 'dark' ? 'dark' : 'light'}"]`);
+  if (cur) cur.checked = true;
+});
+themeRadios.forEach((radio) => {
+  radio.addEventListener('change', () => {
+    if (!radio.checked) return;
+    chrome.storage.sync.set({ overlayTheme: radio.value }, showSaved);
+  });
+});
 
 modeRadios.forEach((radio) => {
   radio.addEventListener('change', () => {
@@ -924,11 +1299,12 @@ function renderDisableExtensionSiteOption(extensionDisabledSites) {
 
 function applyExtensionDisabledState() {
   qualitySelect.disabled = currentSiteExtensionDisabled;
+  document.body.classList.toggle('ext-disabled', currentSiteExtensionDisabled);
   if (currentSiteExtensionDisabled) {
-    sendBtn.disabled = true;
+    setSendDisabled(true);
     setStatus(t('extension_disabled_site', currentLang), 'error');
   } else {
-    sendBtn.disabled = false;
+    setSendDisabled(false);
     // Si el status todavía mostraba el aviso de "desactivada en este
     // sitio" (por ejemplo, el usuario la reactivó desde acá mismo sin
     // cerrar el popup), lo limpiamos para no dejar un mensaje viejo.

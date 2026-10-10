@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "YT-DLP Minimalist — Enviar video",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Envía la URL de la pestaña actual a YT-DLP Minimalist para descargarla con yt-dlp.",
   "action": {
     "default_popup": "popup.html",

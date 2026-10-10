@@ -30,6 +30,19 @@
         <span class="sidebar-item-icon">+</span>
         <span class="sidebar-item-label" data-i18n="btn_new_task">Nueva tarea</span>
       </button>
+      <button id="sidebar-video" class="sidebar-item" data-i18n-title="tt_sidebar_video" title="Video cargado">
+        <span class="sidebar-item-icon">&#9654;</span>
+        <span class="sidebar-item-label" data-i18n="menu_video">Video</span>
+      </button>
+      <button id="sidebar-playlist" class="sidebar-item" data-i18n-title="tt_sidebar_playlist" title="Playlist">
+        <span class="sidebar-item-icon">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M2 3.5h12M2 7h6M2 10.5h5"/>
+            <path d="M10.5 9.2v4.6l3.8-2.3z" fill="currentColor"/>
+          </svg>
+        </span>
+        <span class="sidebar-item-label" data-i18n="menu_playlist">Playlist</span>
+      </button>
       <button id="sidebar-terminal" class="sidebar-item" data-i18n-title="menu_terminal" title="Terminal">
         <span class="sidebar-item-icon">&#9656;_</span>
         <span class="sidebar-item-label" data-i18n="menu_terminal">Terminal</span>
@@ -86,6 +99,12 @@
       </div>
 
       <div id="status-home" class="status"></div>
+
+      <div class="clipboard-banner hidden" id="clipboard-banner" role="status">
+        <span class="clipboard-banner-text" id="clipboard-banner-text"></span>
+        <button type="button" id="clipboard-banner-add" class="settings-inline-btn" data-i18n="btn_clipboard_add">agregar</button>
+        <button type="button" id="clipboard-banner-dismiss" class="settings-inline-btn" data-i18n="btn_clipboard_dismiss">ignorar</button>
+      </div>
     </main>
 
     <!-- ===== Pantalla 2: formatos y presets (picker), reemplaza a la de inicio ===== -->
@@ -172,6 +191,7 @@
             <span class="settings-hint" data-i18n="thumbnails_hint">Incrusta la miniatura del video como carátula del archivo descargado.</span>
           </div>
 
+
           <div class="settings-row">
             <label class="playlist-folder-checkbox">
               <input type="checkbox" id="setting-chapters-enabled" />
@@ -231,10 +251,23 @@
         <span class="back-arrow">&larr;</span> <span data-i18n="btn_back">volver</span>
       </button>
 
-      <div class="video-meta" id="playlist-meta">
-        <p class="video-title" id="playlist-title"></p>
-        <p class="video-sub" id="playlist-count"></p>
-      </div>
+      <div class="picker-layout" id="playlist-layout">
+        <!-- Columna izquierda: info de la playlist y controles (igual que la pantalla de un solo video) -->
+        <div class="playlist-meta-col" id="playlist-meta">
+          <img class="video-thumb hidden" id="playlist-thumb" alt="" />
+          <div class="playlist-meta-text">
+            <p class="video-title" id="playlist-title"></p>
+            <p class="video-sub" id="playlist-count"></p>
+            <p class="playlist-selected-count" id="playlist-selected-count"></p>
+          </div>
+
+          <div class="playlist-quality">
+            <span class="playlist-quality-label" data-i18n="playlist_quality_label">calidad</span>
+            <button type="button" id="playlist-quality-btn" class="playlist-quality-btn" aria-haspopup="true" aria-expanded="false">
+              <span id="playlist-quality-btn-text"></span><span class="pq-caret">&#9662;</span>
+            </button>
+            <div id="playlist-quality-menu" class="pq-menu hidden" role="menu"></div>
+          </div>
 
       <div class="playlist-folder-row">
         <div class="settings-row">
@@ -250,47 +283,59 @@
         </label>
       </div>
 
-      <div class="playlist-toolbar">
+          <div class="playlist-toolbar">
         <label class="playlist-select-all">
           <input type="checkbox" id="playlist-select-all" checked />
           <span data-i18n="playlist_select_all">seleccionar todos</span>
         </label>
 
-        <div class="playlist-toolbar-right">
+            <div class="playlist-toolbar-right">
+          <button type="button" id="playlist-range-btn" class="playlist-reverse-btn" data-i18n-title="tt_playlist_range" title="Seleccionar un rango de videos (del N al M)">
+            <span class="playlist-reverse-icon">&#8596;</span> <span data-i18n="btn_playlist_range">rango</span>
+          </button>
+
           <button type="button" id="playlist-reverse-btn" class="playlist-reverse-btn" data-i18n-title="tt_playlist_reverse" title="Invertir el orden de la lista">
             <span class="playlist-reverse-icon">&#8645;</span> <span data-i18n="btn_playlist_reverse">invertir orden</span>
           </button>
 
-          <div class="playlist-quality">
-            <span class="playlist-quality-label" data-i18n="playlist_quality_label">calidad</span>
-            <select id="playlist-quality-select">
-              <option value="best" data-i18n="opt_quality_best">Mejor video y audio disponibles</option>
-              <option value="audio" data-i18n="opt_quality_audio">Mejor audio disponible (MP3)</option>
-              <option value="audio-m4a" data-i18n="opt_quality_audio_m4a">Solo audio (M4A)</option>
-              <option value="audio-opus" data-i18n="opt_quality_audio_opus">Solo audio (OPUS)</option>
-              <option value="2160" data-i18n="opt_quality_2160">Hasta 2160p (4K)</option>
-              <option value="1440" data-i18n="opt_quality_1440">Hasta 1440p (2K)</option>
-              <option value="1080" data-i18n="opt_quality_1080">Hasta 1080p</option>
-              <option value="720" data-i18n="opt_quality_720">Hasta 720p</option>
-              <option value="480" data-i18n="opt_quality_480">Hasta 480p</option>
-              <option value="360" data-i18n="opt_quality_360">Hasta 360p</option>
-              <option value="240" data-i18n="opt_quality_240">Hasta 240p</option>
-              <option value="144" data-i18n="opt_quality_144">Hasta 144p</option>
-            </select>
+            </div>
           </div>
-        </div>
+
+      <div class="playlist-range-panel hidden" id="playlist-range-panel">
+        <label><span data-i18n="playlist_range_from">Desde</span> <input type="number" id="playlist-range-from" min="1" step="1" /></label>
+        <label><span data-i18n="playlist_range_to">Hasta</span> <input type="number" id="playlist-range-to" min="1" step="1" /></label>
+        <button type="button" id="playlist-range-apply" class="settings-inline-btn" data-i18n="btn_playlist_range_apply">Seleccionar rango</button>
+        <span class="playlist-range-hint" data-i18n="playlist_range_hint">Shift + clic: seleccionar rango</span>
       </div>
 
+        </div>
 
+        <!-- Columna derecha: lista de videos y descarga -->
+        <div class="picker-layout-right">
       <div class="download-frame" id="playlist-frame">
         <span class="download-frame-label" data-i18n="download_frame_label_videos">Videos</span>
+        <div class="playlist-filter-bar" id="playlist-filter-bar">
+          <input type="search" id="playlist-search" data-i18n-placeholder="ph_playlist_search" placeholder="Buscar en la lista…" autocomplete="off" spellcheck="false" />
+          <select id="playlist-duration-filter" data-i18n-title="tt_playlist_duration_filter" title="Filtrar por duración">
+            <option value="all" data-i18n="opt_duration_all">Cualquier duración</option>
+            <option value="short">&lt; 5 min</option>
+            <option value="medium">5 – 20 min</option>
+            <option value="long">&gt; 20 min</option>
+          </select>
+        </div>
+        <div class="playlist-filter-info hidden" id="playlist-filter-info">
+          <span id="playlist-filter-info-text"></span>
+          <button type="button" id="playlist-filter-only-btn" data-i18n="btn_filter_only" data-i18n-title="tt_filter_only" title="Marca solo los videos visibles y desmarca el resto">Seleccionar solo estos</button>
+        </div>
         <div class="playlist-list" id="playlist-list"></div>
       </div>
 
-      <div id="status-playlist" class="status"></div>
+          <div id="status-playlist" class="status"></div>
 
-      <div class="playlist-actions">
-        <button id="playlist-download-btn" class="primary" data-i18n="btn_download_selected">Descargar seleccionados</button>
+          <div class="picker-actions">
+            <button id="playlist-download-btn" class="primary" data-i18n="btn_download_selected">Descargar seleccionados</button>
+          </div>
+        </div>
       </div>
     </main>
 
@@ -310,10 +355,35 @@
       </div>
 
       <div class="activity-page-body">
+        <div class="history-search-bar hidden" id="history-search-bar">
+          <input type="text" id="history-search-input" data-i18n-placeholder="history_search_ph" placeholder="Buscar por título, sitio o enlace…" autocomplete="off" />
+          <button type="button" id="history-export-btn" class="settings-inline-btn" data-i18n="btn_export_list" data-i18n-title="tt_export_list" title="Exportar la lista que se ve (CSV o JSON)">exportar lista</button>
+        </div>
         <div class="activity-tab-panel" id="activity-panel-downloads">
           <div class="downloads-speed-summary" id="downloads-speed-summary">
             <span class="downloads-speed-summary-icon">⇅</span>
             <span id="downloads-speed-summary-text"></span>
+          </div>
+          <div class="queue-controls" id="queue-controls">
+            <label class="queue-control" data-i18n-title="queue_ctrl_concurrent_tt" title="Cuántas descargas de la cola van a la vez. Se puede cambiar mientras descarga.">
+              <span data-i18n="queue_ctrl_concurrent">Simultáneas</span>
+              <select id="queue-concurrent-select">
+                <option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option>
+                <option value="5">5</option><option value="6">6</option><option value="7">7</option><option value="8">8</option>
+              </select>
+            </label>
+            <label class="queue-control" data-i18n-title="queue_ctrl_rate_tt" title="Límite de velocidad por descarga (ej. 1M, 500K).">
+              <span data-i18n="queue_ctrl_rate">Límite</span>
+              <input type="text" id="queue-rate-input" data-i18n-placeholder="queue_ctrl_rate_ph" placeholder="sin límite" maxlength="12" />
+            </label>
+            <label class="queue-control" data-i18n-title="queue_ctrl_after_tt" title="Acción única al terminar toda la cola.">
+              <span data-i18n="queue_ctrl_after">Al terminar</span>
+              <select id="queue-after-select">
+                <option value="none" data-i18n="queue_after_none">no hacer nada</option>
+                <option value="sleep" data-i18n="queue_after_sleep">suspender el equipo</option>
+                <option value="shutdown" data-i18n="queue_after_shutdown">apagar el equipo</option>
+              </select>
+            </label>
           </div>
           <div class="downloads-toolbar hidden" id="downloads-toolbar">
             <label class="downloads-select-all">
@@ -340,6 +410,12 @@
         </div>
 
         <div class="activity-tab-panel hidden" id="activity-panel-error">
+          <div class="downloads-toolbar hidden" id="error-toolbar">
+            <span></span>
+            <div class="downloads-toolbar-right">
+              <button type="button" id="error-retry-all-btn" class="settings-inline-btn" data-i18n="btn_retry_all" data-i18n-title="tt_retry_all" title="Reintentar todas las descargas con error">reintentar todas</button>
+            </div>
+          </div>
           <div class="history-list-wrap" id="error-list-wrap">
             <div class="history-empty" id="error-empty" data-i18n="empty_error">Todavía no hay descargas con error.</div>
             <div class="history-list" id="error-list"></div>
@@ -430,6 +506,14 @@
                       </label>
                       <span class="settings-hint" data-i18n="extension_keep_in_background_hint">Si ya elegiste la calidad en el navegador (popup o botón flotante), la descarga arranca sin traer la ventana al frente. No aplica cuando hay que elegir la calidad en el selector de la app.</span>
                     </div>
+
+                    <div class="settings-row">
+                      <label class="playlist-folder-checkbox">
+                        <input type="checkbox" id="setting-clipboard-watch" checked />
+                        <span data-i18n="clipboard_watch">Avisar cuando haya un link copiado</span>
+                      </label>
+                      <span class="settings-hint" data-i18n="clipboard_watch_hint">Al volver a la app, si copiaste un link (o varios), aparece un aviso en Inicio para agregarlo. Solo se lee el portapapeles en ese momento.</span>
+                    </div>
                   </div>
 
                   <div class="presets-actions">
@@ -463,7 +547,18 @@
                     <div class="settings-row">
                       <label for="setting-output-template" data-i18n="settings_row_output_template">Plantilla de salida</label>
                       <input type="text" id="setting-output-template" placeholder="%(title).200B - %(uploader).30B.%(ext)s" />
-                      <span class="settings-hint" data-i18n="output_template_hint">Formato de nombre de archivo usado por yt-dlp (-o)</span>
+                      <div class="template-chips" id="template-chips">
+                        <button type="button" class="settings-inline-btn" data-token="{canal}">{canal}</button>
+                        <button type="button" class="settings-inline-btn" data-token="{titulo}">{titulo}</button>
+                        <button type="button" class="settings-inline-btn" data-token="{artista}">{artista}</button>
+                        <button type="button" class="settings-inline-btn" data-token="{fecha}">{fecha}</button>
+                        <button type="button" class="settings-inline-btn" data-token="{año}">{año}</button>
+                        <button type="button" class="settings-inline-btn" data-token="{sitio}">{sitio}</button>
+                        <button type="button" class="settings-inline-btn" data-token="{playlist}">{playlist}</button>
+                        <button type="button" class="settings-inline-btn" data-token="{indice}">{indice}</button>
+                        <button type="button" class="settings-inline-btn" data-token="/">/</button>
+                      </div>
+                      <span class="settings-hint" data-i18n="output_template_hint">Formato de nombre de archivo usado por yt-dlp (-o). También acepta marcadores simples como {canal}/{titulo}: la barra / crea carpetas. Ejemplo: {canal}/{fecha} - {titulo}</span>
                     </div>
 
                     <div class="settings-row">
@@ -489,8 +584,32 @@
                         <option value="3" data-i18n="opt_concurrent_3">3 a la vez</option>
                         <option value="4" data-i18n="opt_concurrent_4">4 a la vez</option>
                         <option value="5" data-i18n="opt_concurrent_5">5 a la vez</option>
+                        <option value="6" data-i18n="opt_concurrent_6">6 a la vez</option>
+                        <option value="7" data-i18n="opt_concurrent_7">7 a la vez</option>
+                        <option value="8" data-i18n="opt_concurrent_8">8 a la vez</option>
                       </select>
                       <span class="settings-hint" data-i18n="concurrent_hint">Cantidad de videos de una lista que se descargan al mismo tiempo</span>
+                    </div>
+
+                    <div class="settings-row">
+                      <label for="setting-auto-retries" data-i18n="settings_row_auto_retries">Reintentos automáticos</label>
+                      <select id="setting-auto-retries">
+                        <option value="0" data-i18n="opt_retries_0">Desactivados</option>
+                        <option value="1" data-i18n="opt_retries_1">1 vez</option>
+                        <option value="2" data-i18n="opt_retries_2">2 veces</option>
+                        <option value="3" data-i18n="opt_retries_3">3 veces</option>
+                        <option value="4" data-i18n="opt_retries_4">4 veces</option>
+                        <option value="5" data-i18n="opt_retries_5">5 veces</option>
+                      </select>
+                      <span class="settings-hint" data-i18n="auto_retries_hint">Cuántas veces se reintenta sola una descarga que falla por algo pasajero (red, servidor). No se reintentan videos privados, eliminados o no disponibles.</span>
+                    </div>
+
+                    <div class="settings-row">
+                      <label class="playlist-folder-checkbox">
+                        <input type="checkbox" id="setting-notify-queue-finish" checked />
+                        <span data-i18n="notify_on_queue_finish">Avisar con una notificación al terminar la cola</span>
+                      </label>
+                      <span class="settings-hint" data-i18n="notify_on_queue_finish_hint">Aparece una notificación de escritorio cuando terminan varias descargas, solo si la ventana no está al frente.</span>
                     </div>
 
                     <div class="settings-row">
@@ -684,6 +803,21 @@
                       <span class="update-progress-text" id="update-deno-progress-text"></span>
                     </div>
 
+                    <div class="update-row">
+                      <div class="update-row-info">
+                        <span class="update-row-title">PO Token (bgutil)</span>
+                        <span class="update-row-version" id="update-pot-version" data-i18n="checking_version">Consultando versión…</span>
+                        <span class="update-available-tag hidden" id="update-pot-available-tag" data-i18n="new_version_available">Nueva versión disponible</span>
+                        <span class="update-uptodate-tag hidden" id="update-pot-uptodate-tag" data-i18n="up_to_date">✓ Estás en la última versión</span>
+                        <span class="update-row-desc" data-i18n="pot_desc">Servidor y plugin que generan el PO Token para YouTube (videos con restricción de edad). Los tokens se renuevan solos; esto actualiza el proveedor en sí. Se instala solo la primera vez que hace falta.</span>
+                      </div>
+                      <button id="update-pot-btn" class="settings-inline-btn" data-i18n="btn_install">Instalar</button>
+                    </div>
+                    <div class="update-progress hidden" id="update-pot-progress-wrap">
+                      <div class="update-progress-bar"><div class="update-progress-fill" id="update-pot-progress-fill"></div></div>
+                      <span class="update-progress-text" id="update-pot-progress-text"></span>
+                    </div>
+
                     <div id="updates-status" class="settings-hint"></div>
                   </div>
     
@@ -696,7 +830,7 @@
                   <div class="settings-form about-body">
                     <div class="about-header">
                       <span class="logo-text about-logo" data-text="YT-DLP">YT-DLP</span>
-                      <p class="about-version" id="about-version">v1.3.0</p>
+                      <p class="about-version" id="about-version">v1.4.0</p>
                       <a href="https://t.me/xSHIMURAx" target="_blank" rel="noopener noreferrer" class="about-link">✿ S H I M U R A ✿</a>
                     </div>
 
@@ -706,6 +840,8 @@
                       <div class="about-list-row"><span>yt-dlp-wrap</span><span>v2.3.12</span></div>
                       <div class="about-list-row"><span>ffmpeg</span><span id="about-ffmpeg-version" data-i18n="checking_version">Consultando versión…</span></div>
                       <div class="about-list-row"><span>Deno</span><span id="about-deno-version" data-i18n="checking_version">Consultando versión…</span></div>
+                      <div class="about-list-row"><span>bgutil pot-server</span><span id="about-pot-server-version" data-i18n="checking_version">Consultando versión…</span></div>
+                      <div class="about-list-row"><span>bgutil yt-dlp-plugin</span><span id="about-pot-plugin-version" data-i18n="checking_version">Consultando versión…</span></div>
                       <div class="about-list-row"><span>electron-builder</span><span>v24.13.3</span></div>
                     </div>
 
@@ -717,7 +853,6 @@
                     </div>
 
                     <p class="about-footer" data-i18n="made_with_electron">Hecho con Electron</p>
-                    <p class="about-footer about-credit"><span data-i18n="about_credit">Basado inicialmente en</span> <a href="https://github.com/pablostanley/yoinks" target="_blank" rel="noopener noreferrer">YOINKS</a></p>
                   </div>
     
           </div>
@@ -877,6 +1012,11 @@
         <p class="preview-video-error hidden" id="preview-video-error" data-i18n="preview_video_error">No se pudo reproducir el archivo (¿se movió o se borró?).</p>
       </div>
     </div>
+  </div>
+
+  <div class="power-countdown hidden" id="power-countdown" role="alert">
+    <span id="power-countdown-text"></span>
+    <button type="button" id="power-countdown-cancel" class="settings-inline-btn danger" data-i18n="btn_cancel_power">Cancelar</button>
   </div>
 
   <script src="i18n.js"></script>
